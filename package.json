@@ -12,6 +12,7 @@
     "convex:deploy": "convex deploy"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.3",
     "convex": "^1.32.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

@@ -2,6 +2,12 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## Vercel Links
+
+- Production: [https://tcgims3.vercel.app](https://tcgims3.vercel.app)
+- Production deployment: [https://tcgims3-lj9f3l4wx-joshrzemiens-projects.vercel.app](https://tcgims3-lj9f3l4wx-joshrzemiens-projects.vercel.app)
+- Preview deployment: [https://tcgims3-hdghmwopi-joshrzemiens-projects.vercel.app](https://tcgims3-hdghmwopi-joshrzemiens-projects.vercel.app)
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
