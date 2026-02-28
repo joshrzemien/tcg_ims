@@ -13,6 +13,7 @@
 - ASK THE USER for explicit approval before adding ANY DEPENDENCY WHATSOEVER.
 - ASK THE USER for explicit approval before MAKING ANY SIGNIFICANT ARCHITECTURAL DECISIONS.
 - Keep implementation minimal and only build what is strictly required for the current request.
+- After committing code, always push/deploy updates to Vercel and Convex so hosted environments stay in sync with the latest commit.
 
 ## Environment Variable Management
 - Manage browser/build-time vars in Vercel via CLI (`vercel env ...`), not by hardcoding.
