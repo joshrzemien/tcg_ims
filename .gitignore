@@ -25,3 +25,7 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+
+# human
+PRD.md
+planning.md
