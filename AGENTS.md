@@ -11,6 +11,10 @@
 - **Actions** CANNOT directly read/write the DB — they must call queries
   and mutations internally.
 
+## API Integrations/Webhooks
+Webhooks hit Convex HTTP actions directly, never proxy through Vercel
+Prefer webhooks over polling when the external API supports both
+
 ## Canonical types
 The frontend never sees external API types — only our canonical types.
 
