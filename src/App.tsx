@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { useAction, useMutation, useQuery } from 'convex/react'
+import { useAction, useConvexAuth, useMutation, useQuery } from 'convex/react'
 import {
-  useAuth,
   SignedIn,
   SignedOut,
   SignInButton,
@@ -56,7 +55,7 @@ function cleanOptional(value: string) {
 }
 
 function App() {
-  const { isSignedIn } = useAuth()
+  const { isAuthenticated, isLoading } = useConvexAuth()
   const verifyAndSaveAddress = useAction(api.shipping.actions.verifyAndSaveAddress)
   const purchaseLabel = useAction(api.shipping.actions.purchaseLabel)
   const voidLabel = useAction(api.shipping.actions.voidLabel)
@@ -76,33 +75,37 @@ function App() {
   const [busyAction, setBusyAction] = useState('')
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const canRunAuthedOperations = isAuthenticated && !isLoading
 
   const orderShipments = useQuery(
     api.shipping.queries.listShipmentsByOrder,
-    isSignedIn && orderId.trim()
+    canRunAuthedOperations && orderId.trim()
       ? { orderId: orderId.trim() as Id<'orders'> }
       : 'skip',
   )
   const shipment = useQuery(
     api.shipping.queries.getShipment,
-    isSignedIn && shipmentId.trim()
+    canRunAuthedOperations && shipmentId.trim()
       ? { shipmentId: shipmentId.trim() as Id<'shipments'> }
       : 'skip',
   )
   const trackingEvents = useQuery(
     api.shipping.queries.listTrackingEvents,
-    isSignedIn && shipmentId.trim()
+    canRunAuthedOperations && shipmentId.trim()
       ? { shipmentId: shipmentId.trim() as Id<'shipments'> }
       : 'skip',
   )
   const refund = useQuery(
     api.shipping.queries.getRefundByShipment,
-    isSignedIn && shipmentId.trim()
+    canRunAuthedOperations && shipmentId.trim()
       ? { shipmentId: shipmentId.trim() as Id<'shipments'> }
       : 'skip',
   )
 
   const runAction = async (name: string, fn: () => Promise<void>) => {
+    if (!canRunAuthedOperations) {
+      throw new Error('Authentication is still loading. Please retry in a moment.')
+    }
     setBusyAction(name)
     setErrorMessage(null)
     setStatusMessage(`Running: ${name}`)
@@ -314,7 +317,7 @@ function App() {
                 </div>
                 <button
                   className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={busyAction.length > 0}
+                  disabled={busyAction.length > 0 || !canRunAuthedOperations}
                   onClick={() => void verifyAddress('from')}
                 >
                   Verify From Address
@@ -393,7 +396,7 @@ function App() {
                 </div>
                 <button
                   className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={busyAction.length > 0}
+                  disabled={busyAction.length > 0 || !canRunAuthedOperations}
                   onClick={() => void verifyAddress('to')}
                 >
                   Verify To Address
@@ -459,21 +462,21 @@ function App() {
               <div className="flex flex-wrap gap-2">
                 <button
                   className="rounded bg-indigo-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={busyAction.length > 0}
+                  disabled={busyAction.length > 0 || !canRunAuthedOperations}
                   onClick={() => void handleCreateTestOrder()}
                 >
                   Create Test Order
                 </button>
                 <button
                   className="rounded bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={busyAction.length > 0}
+                  disabled={busyAction.length > 0 || !canRunAuthedOperations}
                   onClick={() => void handlePurchase()}
                 >
                   Purchase Label
                 </button>
                 <button
                   className="rounded bg-amber-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={busyAction.length > 0}
+                  disabled={busyAction.length > 0 || !canRunAuthedOperations}
                   onClick={() => void handleVoid()}
                 >
                   Void Label
