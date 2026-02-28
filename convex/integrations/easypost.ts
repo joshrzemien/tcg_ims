@@ -52,6 +52,13 @@ export interface CreatedShipment {
   rates: ShipmentRate[];
 }
 
+export interface RetrievedShipment {
+  easypostShipmentId: string;
+  rates: ShipmentRate[];
+  purchased: boolean;
+  purchasedData: PurchasedShipment | null;
+}
+
 export interface PurchasedShipment {
   trackingNumber: string;
   labelUrl: string;
@@ -63,6 +70,43 @@ export interface PurchasedShipment {
 
 export interface RefundResult {
   easypostRefundStatus: string;
+}
+
+interface EasyPostRateRaw {
+  id: string;
+  carrier: string;
+  service: string;
+  rate: string;
+  delivery_days?: number | null;
+}
+
+interface EasyPostAddressVerificationResponse {
+  id: string;
+  street1: string;
+  street2?: string;
+  city: string;
+  state: string;
+  zip: string;
+  country: string;
+  verifications?: {
+    delivery?: {
+      success?: boolean;
+      errors?: Array<{ message?: string }>;
+    };
+  };
+}
+
+interface EasyPostShipmentResponse {
+  id: string;
+  rates?: EasyPostRateRaw[];
+  tracking_code?: string;
+  postage_label?: { label_url?: string };
+  selected_rate?: { rate?: string; carrier?: string; service?: string };
+  tracker?: { id?: string };
+}
+
+interface EasyPostRefundResponse {
+  refund_status: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,7 +144,10 @@ async function easypostFetch(
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  const data = await res.json();
+  let data: unknown = null;
+  if (res.status !== 204) {
+    data = await res.json();
+  }
 
   if (!res.ok) {
     const err = (data as Record<string, unknown>)?.error as
@@ -121,6 +168,16 @@ function dollarsToCents(dollars: string): number {
   return Math.round(parseFloat(dollars) * 100);
 }
 
+function mapRates(data: { rates?: EasyPostRateRaw[] }): ShipmentRate[] {
+  return (data.rates ?? []).map((r) => ({
+    rateId: r.id,
+    carrier: r.carrier,
+    service: r.service,
+    rateCents: dollarsToCents(r.rate),
+    deliveryDays: r.delivery_days ?? null,
+  }));
+}
+
 // ---------------------------------------------------------------------------
 // Public API functions
 // ---------------------------------------------------------------------------
@@ -133,16 +190,14 @@ export async function verifyAddress(
   apiKey: string,
   address: AddressInput,
 ): Promise<VerifiedAddress> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (await easypostFetch(apiKey, "POST", "/addresses", {
     address: { ...address, verify: ["delivery"] },
-  })) as any;
+  })) as EasyPostAddressVerificationResponse;
 
   const delivery = data.verifications?.delivery;
   const isVerified: boolean = delivery?.success === true;
-  const verificationErrors: string[] = (delivery?.errors ?? []).map(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (e: any) => e.message ?? "Unknown verification error",
+  const verificationErrors: string[] = (delivery?.errors ?? []).map((e) =>
+    e.message ?? "Unknown verification error",
   );
 
   return {
@@ -170,7 +225,6 @@ export async function createShipment(
     parcel: ParcelInput;
   },
 ): Promise<CreatedShipment> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (await easypostFetch(apiKey, "POST", "/shipments", {
     shipment: {
       from_address: { id: opts.fromAddressId },
@@ -183,18 +237,59 @@ export async function createShipment(
       },
       options: { label_format: "PNG", label_size: "4x6" },
     },
-  })) as any;
+  })) as EasyPostShipmentResponse;
+  if (!data.id) throw new Error("EasyPost shipment missing ID");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rates: ShipmentRate[] = (data.rates ?? []).map((r: any) => ({
-    rateId: r.id,
-    carrier: r.carrier,
-    service: r.service,
-    rateCents: dollarsToCents(r.rate),
-    deliveryDays: r.delivery_days ?? null,
-  }));
+  const rates = mapRates(data);
 
   return { easypostShipmentId: data.id, rates };
+}
+
+/**
+ * Retrieve an existing shipment from EasyPost.
+ */
+export async function getShipment(
+  apiKey: string,
+  shipmentId: string,
+): Promise<RetrievedShipment> {
+  const data = (await easypostFetch(
+    apiKey,
+    "GET",
+    `/shipments/${shipmentId}`,
+  )) as EasyPostShipmentResponse;
+
+  const trackingNumber = data.tracking_code;
+  const labelUrl = data.postage_label?.label_url;
+  const rate = data.selected_rate?.rate;
+  const carrier = data.selected_rate?.carrier;
+  const service = data.selected_rate?.service;
+  const trackerId = data.tracker?.id;
+  const hasPurchasedData =
+    !!trackingNumber &&
+    !!labelUrl &&
+    !!rate &&
+    !!carrier &&
+    !!service &&
+    !!trackerId;
+  let purchasedData: PurchasedShipment | null = null;
+  if (trackingNumber && labelUrl && rate && carrier && service && trackerId) {
+    purchasedData = {
+      trackingNumber,
+      labelUrl,
+      rateCents: dollarsToCents(rate),
+      carrier,
+      service,
+      easypostTrackerId: trackerId,
+    };
+  }
+  if (!data.id) throw new Error("EasyPost shipment missing ID");
+
+  return {
+    easypostShipmentId: data.id,
+    rates: mapRates(data),
+    purchased: hasPurchasedData,
+    purchasedData,
+  };
 }
 
 /**
@@ -205,21 +300,29 @@ export async function buyShipment(
   shipmentId: string,
   rateId: string,
 ): Promise<PurchasedShipment> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (await easypostFetch(
     apiKey,
     "POST",
     `/shipments/${shipmentId}/buy`,
     { rate: { id: rateId } },
-  )) as any;
+  )) as EasyPostShipmentResponse;
+  const trackingNumber = data.tracking_code;
+  const labelUrl = data.postage_label?.label_url;
+  const rate = data.selected_rate?.rate;
+  const carrier = data.selected_rate?.carrier;
+  const service = data.selected_rate?.service;
+  const trackerId = data.tracker?.id;
+  if (!trackingNumber || !labelUrl || !rate || !carrier || !service || !trackerId) {
+    throw new Error("EasyPost buy response missing required purchased fields");
+  }
 
   return {
-    trackingNumber: data.tracking_code,
-    labelUrl: data.postage_label.label_url,
-    rateCents: dollarsToCents(data.selected_rate.rate),
-    carrier: data.selected_rate.carrier,
-    service: data.selected_rate.service,
-    easypostTrackerId: data.tracker.id,
+    trackingNumber,
+    labelUrl,
+    rateCents: dollarsToCents(rate),
+    carrier,
+    service,
+    easypostTrackerId: trackerId,
   };
 }
 
@@ -230,14 +333,13 @@ export async function refundShipment(
   apiKey: string,
   shipmentId: string,
 ): Promise<RefundResult> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const data = (await easypostFetch(
     apiKey,
     "POST",
     `/shipments/${shipmentId}/refund`,
-  )) as any;
+  )) as EasyPostRefundResponse;
 
-  return { easypostRefundStatus: data.refund_status };
+  return { easypostRefundStatus: data.refund_status ?? "unknown" };
 }
 
 // ---------------------------------------------------------------------------

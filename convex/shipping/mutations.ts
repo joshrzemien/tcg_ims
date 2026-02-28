@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 export const createAddress = internalMutation({
   args: {
+    ownerUserId: v.string(),
     street1: v.string(),
     street2: v.optional(v.string()),
     city: v.string(),
@@ -47,6 +48,7 @@ export const updateAddressVerification = internalMutation({
 
 export const createShipment = internalMutation({
   args: {
+    ownerUserId: v.string(),
     orderId: v.id("orders"),
     fromAddressId: v.id("addresses"),
     toAddressId: v.id("addresses"),
@@ -80,6 +82,19 @@ export const updateShipmentPurchased = internalMutation({
     await ctx.db.patch(shipmentId, {
       ...fields,
       status: "purchased",
+      errorMessage: undefined,
+    });
+  },
+});
+
+export const setShipmentEasypostId = internalMutation({
+  args: {
+    shipmentId: v.id("shipments"),
+    easypostShipmentId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.shipmentId, {
+      easypostShipmentId: args.easypostShipmentId,
     });
   },
 });
@@ -100,12 +115,17 @@ export const updateShipmentStatus = internalMutation({
   },
   handler: async (ctx, args) => {
     const { shipmentId, ...fields } = args;
-    await ctx.db.patch(shipmentId, fields);
+    const patch: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(fields)) {
+      if (val !== undefined) patch[k] = val;
+    }
+    await ctx.db.patch(shipmentId, patch);
   },
 });
 
-export const insertTrackingEvent = internalMutation({
+export const insertTrackingEventIfNew = internalMutation({
   args: {
+    ownerUserId: v.optional(v.string()),
     shipmentId: v.id("shipments"),
     trackingNumber: v.string(),
     easypostEventId: v.string(),
@@ -118,12 +138,24 @@ export const insertTrackingEvent = internalMutation({
     country: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("trackingEvents", args);
+    const existing = await ctx.db
+      .query("trackingEvents")
+      .withIndex("by_easypostEventId", (q) =>
+        q.eq("easypostEventId", args.easypostEventId),
+      )
+      .first();
+    if (existing) {
+      return { inserted: false as const };
+    }
+
+    await ctx.db.insert("trackingEvents", args);
+    return { inserted: true as const };
   },
 });
 
 export const createRefund = internalMutation({
   args: {
+    ownerUserId: v.string(),
     shipmentId: v.id("shipments"),
     easypostRefundId: v.optional(v.string()),
     status: v.union(

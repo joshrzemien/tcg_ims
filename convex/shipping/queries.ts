@@ -10,7 +10,12 @@ export const getShipment = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
-    return await ctx.db.get(args.shipmentId);
+    const shipment = await ctx.db.get(args.shipmentId);
+    if (!shipment) return null;
+    if (!shipment.ownerUserId || shipment.ownerUserId !== identity.subject) {
+      throw new Error("Not authorized");
+    }
+    return shipment;
   },
 });
 
@@ -19,7 +24,12 @@ export const getAddress = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
-    return await ctx.db.get(args.addressId);
+    const address = await ctx.db.get(args.addressId);
+    if (!address) return null;
+    if (!address.ownerUserId || address.ownerUserId !== identity.subject) {
+      throw new Error("Not authorized");
+    }
+    return address;
   },
 });
 
@@ -28,10 +38,11 @@ export const listShipmentsByOrder = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
-    return await ctx.db
+    const shipments = await ctx.db
       .query("shipments")
       .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
       .collect();
+    return shipments.filter((s) => s.ownerUserId === identity.subject);
   },
 });
 
@@ -40,6 +51,10 @@ export const listTrackingEvents = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
+    const shipment = await ctx.db.get(args.shipmentId);
+    if (!shipment || !shipment.ownerUserId || shipment.ownerUserId !== identity.subject) {
+      throw new Error("Not authorized");
+    }
     return await ctx.db
       .query("trackingEvents")
       .withIndex("by_shipmentId", (q) =>
@@ -55,6 +70,10 @@ export const getRefundByShipment = query({
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
+    const shipment = await ctx.db.get(args.shipmentId);
+    if (!shipment || !shipment.ownerUserId || shipment.ownerUserId !== identity.subject) {
+      throw new Error("Not authorized");
+    }
     return await ctx.db
       .query("refunds")
       .withIndex("by_shipmentId", (q) =>
@@ -106,15 +125,12 @@ export const getShipmentByEasypostId = internalQuery({
   },
 });
 
-export const trackingEventExists = internalQuery({
-  args: { easypostEventId: v.string() },
+export const listShipmentsByOrderInternal = internalQuery({
+  args: { orderId: v.id("orders") },
   handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("trackingEvents")
-      .withIndex("by_easypostEventId", (q) =>
-        q.eq("easypostEventId", args.easypostEventId),
-      )
-      .first();
-    return existing !== null;
+    return await ctx.db
+      .query("shipments")
+      .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+      .collect();
   },
 });

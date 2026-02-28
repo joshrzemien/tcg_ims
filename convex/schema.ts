@@ -3,6 +3,7 @@ import { v } from "convex/values";
 
 export default defineSchema({
   addresses: defineTable({
+    ownerUserId: v.optional(v.string()),
     street1: v.string(),
     street2: v.optional(v.string()),
     city: v.string(),
@@ -19,6 +20,7 @@ export default defineSchema({
   }).index("by_easypostAddressId", ["easypostAddressId"]),
 
   shipments: defineTable({
+    ownerUserId: v.optional(v.string()),
     orderId: v.id("orders"),
     fromAddressId: v.id("addresses"),
     toAddressId: v.id("addresses"),
@@ -49,6 +51,7 @@ export default defineSchema({
     .index("by_trackingNumber", ["trackingNumber"]),
 
   trackingEvents: defineTable({
+    ownerUserId: v.optional(v.string()),
     shipmentId: v.id("shipments"),
     trackingNumber: v.string(),
     easypostEventId: v.string(),
@@ -65,6 +68,7 @@ export default defineSchema({
     .index("by_easypostEventId", ["easypostEventId"]),
 
   refunds: defineTable({
+    ownerUserId: v.optional(v.string()),
     shipmentId: v.id("shipments"),
     easypostRefundId: v.optional(v.string()),
     status: v.union(

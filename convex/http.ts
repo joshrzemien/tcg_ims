@@ -16,12 +16,11 @@ http.route({
         internal.shipping.actions.processTrackingWebhook,
         { rawBody, signature },
       );
+      return new Response("OK", { status: 200 });
     } catch (err) {
-      // Log but always return 200 to avoid EasyPost retry storms
       console.error("Webhook processing error:", err);
+      return new Response("Webhook error", { status: 500 });
     }
-
-    return new Response("OK", { status: 200 });
   }),
 });
 
