@@ -4,9 +4,11 @@ import { ConvexProvider, ConvexReactClient } from 'convex/react'
 import './index.css'
 import App from './App.tsx'
 
-const convexUrl =
-  import.meta.env.VITE_CONVEX_URL ??
-  'https://jovial-meadowlark-448.convex.cloud'
+const convexUrl = import.meta.env.VITE_CONVEX_URL
+
+if (!convexUrl) {
+  throw new Error('Missing VITE_CONVEX_URL environment variable.')
+}
 
 const convex = new ConvexReactClient(convexUrl)
 
