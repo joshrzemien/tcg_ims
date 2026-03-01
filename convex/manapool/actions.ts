@@ -1214,12 +1214,18 @@ export const processOrderCreatedWebhook = internalAction({
     });
 
     const secrets = webhooks
-      .map((webhook) => ({
+      .map((webhook: { secret?: unknown; ownerUserId?: unknown }) => ({
         secret: toOptionalString(webhook.secret),
         ownerUserId: toOptionalString(webhook.ownerUserId),
       }))
-      .filter((value): value is { secret: string; ownerUserId: string | undefined } =>
-        !!value.secret,
+      .filter(
+        (
+          value: {
+            secret: string | undefined;
+            ownerUserId: string | undefined;
+          },
+        ): value is { secret: string; ownerUserId: string | undefined } =>
+          !!value.secret,
       );
 
     if (secrets.length === 0) {

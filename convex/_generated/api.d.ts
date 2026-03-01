@@ -13,6 +13,7 @@ import type * as hello from "../hello.js";
 import type * as http from "../http.js";
 import type * as integrations_easypost from "../integrations/easypost.js";
 import type * as integrations_manapool from "../integrations/manapool.js";
+import type * as integrations_tcgplayer from "../integrations/tcgplayer.js";
 import type * as manapool_actions from "../manapool/actions.js";
 import type * as manapool_auth from "../manapool/auth.js";
 import type * as manapool_mutations from "../manapool/mutations.js";
@@ -22,6 +23,10 @@ import type * as order_mutations from "../order/mutations.js";
 import type * as shipping_actions from "../shipping/actions.js";
 import type * as shipping_mutations from "../shipping/mutations.js";
 import type * as shipping_queries from "../shipping/queries.js";
+import type * as tcgplayer_actions from "../tcgplayer/actions.js";
+import type * as tcgplayer_mutations from "../tcgplayer/mutations.js";
+import type * as tcgplayer_queries from "../tcgplayer/queries.js";
+import type * as tcgplayer_types from "../tcgplayer/types.js";
 
 import type {
   ApiFromModules,
@@ -35,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   "integrations/easypost": typeof integrations_easypost;
   "integrations/manapool": typeof integrations_manapool;
+  "integrations/tcgplayer": typeof integrations_tcgplayer;
   "manapool/actions": typeof manapool_actions;
   "manapool/auth": typeof manapool_auth;
   "manapool/mutations": typeof manapool_mutations;
@@ -44,6 +50,10 @@ declare const fullApi: ApiFromModules<{
   "shipping/actions": typeof shipping_actions;
   "shipping/mutations": typeof shipping_mutations;
   "shipping/queries": typeof shipping_queries;
+  "tcgplayer/actions": typeof tcgplayer_actions;
+  "tcgplayer/mutations": typeof tcgplayer_mutations;
+  "tcgplayer/queries": typeof tcgplayer_queries;
+  "tcgplayer/types": typeof tcgplayer_types;
 }>;
 
 /**

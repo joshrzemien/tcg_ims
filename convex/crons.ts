@@ -10,4 +10,11 @@ crons.interval(
   {},
 );
 
+crons.interval(
+  "tcgplayer seller reconciliation",
+  { minutes: 15 },
+  internal.tcgplayer.actions.reconcileData,
+  {},
+);
+
 export default crons;

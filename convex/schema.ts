@@ -85,15 +85,27 @@ export default defineSchema({
 
   orders: defineTable({
     ownerUserId: v.optional(v.string()),
-    source: v.optional(v.literal("manapool")),
+    source: v.optional(v.union(v.literal("manapool"), v.literal("tcgplayer"))),
     manapoolOrderId: v.optional(v.string()),
+    tcgplayerOrderNumber: v.optional(v.string()),
+    tcgplayerSellerKey: v.optional(v.string()),
+    tcgplayerSummaryHash: v.optional(v.string()),
     status: v.optional(v.string()),
     label: v.optional(v.string()),
     createdAt: v.optional(v.string()),
     buyerId: v.optional(v.string()),
+    buyerName: v.optional(v.string()),
+    sellerName: v.optional(v.string()),
+    orderChannel: v.optional(v.string()),
+    orderFulfillment: v.optional(v.string()),
+    buyerPaid: v.optional(v.boolean()),
     totalCents: v.optional(v.number()),
     shippingMethod: v.optional(v.string()),
     latestFulfillmentStatus: v.optional(v.string()),
+    estimatedDeliveryAt: v.optional(v.string()),
+    trackingNumbers: v.optional(v.array(v.string())),
+    allowedActions: v.optional(v.array(v.string())),
+    refundStatus: v.optional(v.string()),
     shippingAddress: v.optional(v.any()),
     payment: v.optional(v.any()),
     fulfillments: v.optional(v.array(v.any())),
@@ -102,7 +114,28 @@ export default defineSchema({
     syncUpdatedAt: v.optional(v.string()),
   })
     .index("by_manapoolOrderId", ["manapoolOrderId"])
+    .index("by_tcgplayerOrderNumber", ["tcgplayerOrderNumber"])
+    .index("by_tcgplayerSellerKey_syncUpdatedAt", [
+      "tcgplayerSellerKey",
+      "syncUpdatedAt",
+    ])
     .index("by_syncUpdatedAt", ["syncUpdatedAt"]),
+
+  tcgplayerPendingPayments: defineTable({
+    ownerUserId: v.optional(v.string()),
+    sellerKey: v.string(),
+    totalPendingAmountCents: v.number(),
+    channels: v.array(
+      v.object({
+        channel: v.string(),
+        amountCents: v.number(),
+      }),
+    ),
+    rawHtml: v.string(),
+    syncedAt: v.string(),
+  })
+    .index("by_sellerKey", ["sellerKey"])
+    .index("by_sellerKey_syncedAt", ["sellerKey", "syncedAt"]),
 
   manapoolInventoryItems: defineTable({
     ownerUserId: v.optional(v.string()),
