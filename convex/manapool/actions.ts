@@ -64,7 +64,7 @@ import {
 
 const SELLER_CACHE_TTL_SECONDS = 5 * 60;
 const WEBHOOK_REPLAY_WINDOW_SECONDS = 5 * 60;
-const RECONCILE_PAGE_SIZE = 200;
+const RECONCILE_PAGE_SIZE = 100;
 const RECONCILE_MAX_PAGES = 100;
 
 type CacheCtx = ActionCtx;
