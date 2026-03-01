@@ -1,36 +1,13 @@
 import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function toOptionalBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function toOptionalNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function toOptionalStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  return value.filter((item): item is string => typeof item === "string");
-}
-
-function stripUndefined(fields: Record<string, unknown>): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (value !== undefined) {
-      patch[key] = value;
-    }
-  }
-  return patch;
-}
+import {
+  isRecord,
+  stripUndefined,
+  toOptionalBoolean,
+  toOptionalNumber,
+  toOptionalString,
+  toOptionalStringArray,
+} from "../lib/normalize";
 
 function extractSummaryFields(
   summary: unknown,

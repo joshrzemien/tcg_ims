@@ -1,5 +1,31 @@
 import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
+import { stripUndefined } from "../lib/normalize";
+
+function buildPurchaseAttemptKey(args: {
+  ownerUserId: string;
+  orderId: string;
+  fromAddressId: string;
+  toAddressId: string;
+  parcelLength: number;
+  parcelWidth: number;
+  parcelHeight: number;
+  parcelWeight: number;
+  serviceLevelNormalized: string;
+}): string {
+  // TODO(schema-hardening): Backfill legacy rows and make purchaseAttemptKey required.
+  return [
+    args.ownerUserId,
+    args.orderId,
+    args.fromAddressId,
+    args.toAddressId,
+    args.parcelLength,
+    args.parcelWidth,
+    args.parcelHeight,
+    args.parcelWeight,
+    args.serviceLevelNormalized,
+  ].join("|");
+}
 
 export const createAddress = internalMutation({
   args: {
@@ -39,12 +65,7 @@ export const updateAddressVerification = internalMutation({
   },
   handler: async (ctx, args) => {
     const { addressId, ...fields } = args;
-    // Strip undefined values so we only patch what's provided
-    const patch: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(fields)) {
-      if (val !== undefined) patch[k] = val;
-    }
-    await ctx.db.patch(addressId, patch);
+    await ctx.db.patch(addressId, stripUndefined(fields));
   },
 });
 
@@ -71,6 +92,7 @@ export const createShipment = internalMutation({
     parcelHeight: v.number(),
     parcelWeight: v.number(),
     easypostShipmentId: v.optional(v.string()),
+    purchaseAttemptKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("shipments", {
@@ -93,11 +115,34 @@ export const getOrCreateShipmentForPurchase = internalMutation({
     serviceLevelNormalized: v.string(),
   },
   handler: async (ctx, args) => {
-    const existingByOrder = await ctx.db
+    const purchaseAttemptKey = buildPurchaseAttemptKey({
+      ownerUserId: args.ownerUserId,
+      orderId: args.orderId,
+      fromAddressId: args.fromAddressId,
+      toAddressId: args.toAddressId,
+      parcelLength: args.parcelLength,
+      parcelWidth: args.parcelWidth,
+      parcelHeight: args.parcelHeight,
+      parcelWeight: args.parcelWeight,
+      serviceLevelNormalized: args.serviceLevelNormalized,
+    });
+
+    const indexedMatches = await ctx.db
       .query("shipments")
-      .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+      .withIndex("by_purchaseAttemptKey", (q) =>
+        q.eq("purchaseAttemptKey", purchaseAttemptKey),
+      )
       .collect();
-    const matchingShipments = existingByOrder.filter(
+
+    const existingCandidates =
+      indexedMatches.length > 0
+        ? indexedMatches
+        : await ctx.db
+            .query("shipments")
+            .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
+            .collect();
+
+    const matchingShipments = existingCandidates.filter(
       (s) =>
         s.ownerUserId === args.ownerUserId &&
         s.fromAddressId === args.fromAddressId &&
@@ -121,6 +166,9 @@ export const getOrCreateShipmentForPurchase = internalMutation({
           s.service?.trim().toLowerCase() === args.serviceLevelNormalized,
       );
     if (existingPurchased?.trackingNumber && existingPurchased.labelUrl) {
+      if (existingPurchased.purchaseAttemptKey !== purchaseAttemptKey) {
+        await ctx.db.patch(existingPurchased._id, { purchaseAttemptKey });
+      }
       return {
         kind: "already_purchased" as const,
         shipmentId: existingPurchased._id,
@@ -139,6 +187,9 @@ export const getOrCreateShipmentForPurchase = internalMutation({
           s.status === "purchasing",
       );
     if (existingInProgress) {
+      if (existingInProgress.purchaseAttemptKey !== purchaseAttemptKey) {
+        await ctx.db.patch(existingInProgress._id, { purchaseAttemptKey });
+      }
       return {
         kind: "use_existing" as const,
         shipmentId: existingInProgress._id,
@@ -155,6 +206,7 @@ export const getOrCreateShipmentForPurchase = internalMutation({
       parcelHeight: args.parcelHeight,
       parcelWeight: args.parcelWeight,
       status: "draft",
+      purchaseAttemptKey,
     });
     return { kind: "created" as const, shipmentId };
   },
@@ -277,11 +329,7 @@ export const updateShipmentStatus = internalMutation({
   },
   handler: async (ctx, args) => {
     const { shipmentId, ...fields } = args;
-    const patch: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(fields)) {
-      if (val !== undefined) patch[k] = val;
-    }
-    await ctx.db.patch(shipmentId, patch);
+    await ctx.db.patch(shipmentId, stripUndefined(fields));
   },
 });
 

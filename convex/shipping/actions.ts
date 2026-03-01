@@ -252,6 +252,7 @@ export const purchaseLabel = action({
 
     const serviceLevelNormalized = normalizeServiceLevel(args.serviceLevel);
 
+    // TODO(test): Add concurrency tests for purchase attempt claim/create idempotency.
     // 2. Atomically select or create the shipment attempt for these exact inputs.
     const selected = await ctx.runMutation(
       internal.shipping.mutations.getOrCreateShipmentForPurchase,

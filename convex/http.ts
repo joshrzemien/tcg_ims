@@ -41,7 +41,19 @@ http.route({
       if (result.processed) {
         return new Response("OK", { status: 200 });
       }
-      return new Response(`Webhook rejected: ${result.reason}`, { status: 500 });
+      const status = result.retryable ? 500 : 200;
+      if (!result.retryable) {
+        console.warn("ManaPool webhook rejected (non-retryable)", {
+          reason: result.reason,
+          event,
+        });
+      } else {
+        console.error("ManaPool webhook rejected (retryable)", {
+          reason: result.reason,
+          event,
+        });
+      }
+      return new Response(`Webhook rejected: ${result.reason}`, { status });
     } catch (err) {
       console.error("ManaPool webhook processing error:", err);
       return new Response("Webhook error", { status: 500 });

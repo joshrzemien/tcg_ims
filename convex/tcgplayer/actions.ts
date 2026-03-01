@@ -14,7 +14,10 @@ import {
   type SearchOrdersRequestModel,
 } from "../integrations/tcgplayer";
 import { requireAdminUserId } from "../manapool/auth";
+import { getOptionalRecord, toOptionalNumber } from "../lib/normalize";
 import {
+  type CanonicalOrderDetail,
+  type CanonicalOrderSummary,
   mapOrderDetail,
   mapSearchOrderSummary,
   normalizeFulfillmentFilter,
@@ -45,7 +48,7 @@ type SearchOrdersActionResult =
       source: "live";
       sellerKey: string;
       totalOrders: number;
-      orders: unknown[];
+      orders: CanonicalOrderSummary[];
       ordersUpserted: number;
       changedOrderNumbers: string[];
       newOrderNumbers: string[];
@@ -55,7 +58,7 @@ type SearchOrdersActionResult =
       source: "stale";
       sellerKey: string;
       totalOrders: number;
-      orders: unknown[];
+      orders: CanonicalOrderSummary[];
       ordersUpserted: number;
       changedOrderNumbers: string[];
       newOrderNumbers: string[];
@@ -65,11 +68,11 @@ type SearchOrdersActionResult =
 type GetOrderDetailActionResult =
   | {
       source: "live";
-      order: unknown;
+      order: CanonicalOrderDetail;
     }
   | {
       source: "stale";
-      order: unknown;
+      order: CanonicalOrderDetail;
     };
 
 type GetPendingPaymentsActionResult =
@@ -196,6 +199,85 @@ function toExportResponse(args: {
     contentBase64: args.document.contentBase64,
     mimeType,
     fileName: parseFileName(args.document.contentDisposition, args.fallbackFileName),
+  };
+}
+
+function summaryHashPayload(summary: Omit<CanonicalOrderSummary, "summaryHash">): string {
+  return JSON.stringify({
+    orderNumber: summary.orderNumber,
+    sellerKey: summary.sellerKey,
+    createdAt: summary.createdAt,
+    statusDisplay: summary.statusDisplay,
+    statusCode: summary.statusCode,
+    orderChannel: summary.orderChannel,
+    buyerName: summary.buyerName,
+    shippingType: summary.shippingType,
+    orderFulfillment: summary.orderFulfillment,
+    buyerPaid: summary.buyerPaid,
+    productAmountCents: summary.productAmountCents,
+    shippingAmountCents: summary.shippingAmountCents,
+    totalAmountCents: summary.totalAmountCents,
+  });
+}
+
+function mapSnapshotToCanonicalSummary(
+  order: Doc<"orders">,
+  sellerKey: string,
+): CanonicalOrderSummary | null {
+  const orderNumber = order.tcgplayerOrderNumber;
+  if (!orderNumber) return null;
+
+  const payment = getOptionalRecord(order.payment);
+  const summaryWithoutHash: Omit<CanonicalOrderSummary, "summaryHash"> = {
+    orderNumber,
+    sellerKey: order.tcgplayerSellerKey ?? sellerKey,
+    createdAt: order.createdAt,
+    statusDisplay: order.status,
+    statusCode: order.latestFulfillmentStatus,
+    orderChannel: order.orderChannel,
+    buyerName: order.buyerName,
+    shippingType: order.shippingMethod,
+    orderFulfillment: order.orderFulfillment,
+    buyerPaid: order.buyerPaid,
+    productAmountCents: toOptionalNumber(payment?.productAmountCents),
+    shippingAmountCents: toOptionalNumber(payment?.shippingAmountCents),
+    totalAmountCents: order.totalCents,
+  };
+
+  return {
+    ...summaryWithoutHash,
+    summaryHash:
+      order.tcgplayerSummaryHash ?? summaryHashPayload(summaryWithoutHash),
+  };
+}
+
+function mapSnapshotToCanonicalDetail(
+  order: Doc<"orders">,
+  sellerKey: string,
+): CanonicalOrderDetail | null {
+  const orderNumber = order.tcgplayerOrderNumber;
+  if (!orderNumber) return null;
+
+  return {
+    orderNumber,
+    sellerKey: order.tcgplayerSellerKey ?? sellerKey,
+    createdAt: order.createdAt,
+    statusDisplay: order.status,
+    statusCode: order.latestFulfillmentStatus,
+    orderChannel: order.orderChannel,
+    orderFulfillment: order.orderFulfillment,
+    sellerName: order.sellerName,
+    buyerName: order.buyerName,
+    shippingType: order.shippingMethod,
+    estimatedDeliveryAt: order.estimatedDeliveryAt,
+    payment: getOptionalRecord(order.payment),
+    shippingAddress: getOptionalRecord(order.shippingAddress),
+    items: Array.isArray(order.items) ? order.items : undefined,
+    refunds: undefined,
+    refundStatus: order.refundStatus,
+    trackingNumbers: order.trackingNumbers ?? [],
+    allowedActions: order.allowedActions ?? [],
+    totalCents: order.totalCents,
   };
 }
 
@@ -423,11 +505,12 @@ export const searchOrdersAction = action({
         syncedAt,
       });
 
+      // TODO(test): Cover live/stale contract parity for searchOrdersAction.
       return {
         source: "live" as const,
         sellerKey,
         totalOrders: response.totalOrders,
-        orders: response.orders,
+        orders: summaries,
         ordersUpserted: upsert.upserted,
         changedOrderNumbers: upsert.changedOrderNumbers,
         newOrderNumbers: upsert.newOrderNumbers,
@@ -450,14 +533,18 @@ export const searchOrdersAction = action({
         },
       )) as {
         totalOrders: number;
-        orders: unknown[];
+        orders: Doc<"orders">[];
       };
+
+      const canonicalOrders = stale.orders
+        .map((order) => mapSnapshotToCanonicalSummary(order, sellerKey))
+        .filter((order): order is CanonicalOrderSummary => !!order);
 
       return {
         source: "stale" as const,
         sellerKey,
         totalOrders: stale.totalOrders,
-        orders: stale.orders,
+        orders: canonicalOrders,
         ordersUpserted: 0,
         changedOrderNumbers: [],
         newOrderNumbers: [],
@@ -494,9 +581,10 @@ export const getOrderDetailAction = action({
         syncedAt: new Date().toISOString(),
       });
 
+      // TODO(test): Cover live/stale contract parity for getOrderDetailAction.
       return {
         source: "live" as const,
-        order: detail,
+        order: canonicalDetail,
       };
     } catch (error) {
       if (!isRetriableTcgplayerError(error)) {
@@ -515,9 +603,14 @@ export const getOrderDetailAction = action({
         throw error;
       }
 
+      const canonicalStale = mapSnapshotToCanonicalDetail(stale, sellerKey);
+      if (!canonicalStale) {
+        throw new Error("Stored TCGPlayer snapshot missing orderNumber");
+      }
+
       return {
         source: "stale" as const,
-        order: stale,
+        order: canonicalStale,
       };
     }
   },

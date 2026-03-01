@@ -3,6 +3,11 @@ import { v } from "convex/values";
 import { requireAdminUserId } from "../manapool/auth";
 import type { Doc } from "../_generated/dataModel";
 
+const DEFAULT_PAGE_SIZE = 25;
+const SCAN_BUFFER = 200;
+const MAX_SCAN_LIMIT = 2000;
+const PENDING_PAYMENT_SCAN_LIMIT = 100;
+
 function normalizeToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9]+/g, "").toLowerCase();
 }
@@ -59,13 +64,29 @@ function orderMatchesFilters(
   return true;
 }
 
+function getPageWindow(args: { from?: number; size?: number }): {
+  from: number;
+  size: number;
+} {
+  return {
+    from: Math.max(0, args.from ?? 0),
+    size: Math.max(1, args.size ?? DEFAULT_PAGE_SIZE),
+  };
+}
+
+function getOrderScanLimit(args: { from: number; size: number }): number {
+  // TODO(test): Add regression coverage that stale filtering still returns expected windows.
+  // TODO(schema-hardening): Move list/search endpoints to cursor pagination after vertical slices stabilize.
+  return Math.min(MAX_SCAN_LIMIT, args.from + args.size + SCAN_BUFFER);
+}
+
 function applyOrderSnapshotFilters(args: {
   orders: Doc<"orders">[];
   ownerUserId?: string;
   orderStatuses?: string[];
   fulfillmentTypes?: string[];
-  from?: number;
-  size?: number;
+  from: number;
+  size: number;
 }) {
   const filtered = args.orders
     .filter((doc) => doc.source === "tcgplayer")
@@ -77,11 +98,8 @@ function applyOrderSnapshotFilters(args: {
       }),
     );
 
-  const from = Math.max(0, args.from ?? 0);
-  const size = Math.max(1, args.size ?? 25);
-
   return {
-    orders: filtered.slice(from, from + size),
+    orders: filtered.slice(args.from, args.from + args.size),
     totalOrders: filtered.length,
   };
 }
@@ -117,24 +135,51 @@ export const searchOrderSnapshots = internalQuery({
   },
   handler: async (ctx, args) => {
     const normalizedSellerKey = args.sellerKey?.toLowerCase();
+    const window = getPageWindow(args);
+    const scanLimit = getOrderScanLimit(window);
 
-    const orders = normalizedSellerKey
-      ? await ctx.db
-          .query("orders")
-          .withIndex("by_tcgplayerSellerKey_syncUpdatedAt", (q) =>
-            q.eq("tcgplayerSellerKey", normalizedSellerKey),
-          )
-          .order("desc")
-          .collect()
-      : await ctx.db.query("orders").withIndex("by_syncUpdatedAt").order("desc").collect();
+    const orders =
+      normalizedSellerKey && args.ownerUserId
+        ? await ctx.db
+            .query("orders")
+            .withIndex("by_tcgplayerSellerKey_ownerUserId_syncUpdatedAt", (q) =>
+              q
+                .eq("tcgplayerSellerKey", normalizedSellerKey)
+                .eq("ownerUserId", args.ownerUserId),
+            )
+            .order("desc")
+            .take(scanLimit)
+        : normalizedSellerKey
+          ? await ctx.db
+              .query("orders")
+              .withIndex("by_tcgplayerSellerKey_syncUpdatedAt", (q) =>
+                q.eq("tcgplayerSellerKey", normalizedSellerKey),
+              )
+              .order("desc")
+              .take(scanLimit)
+          : args.ownerUserId
+            ? await ctx.db
+                .query("orders")
+                .withIndex("by_ownerUserId_source_syncUpdatedAt", (q) =>
+                  q.eq("ownerUserId", args.ownerUserId).eq("source", "tcgplayer"),
+                )
+                .order("desc")
+                .take(scanLimit)
+            : await ctx.db
+                .query("orders")
+                .withIndex("by_source_syncUpdatedAt", (q) =>
+                  q.eq("source", "tcgplayer"),
+                )
+                .order("desc")
+                .take(scanLimit);
 
     return applyOrderSnapshotFilters({
       orders,
       ownerUserId: args.ownerUserId,
       orderStatuses: args.orderStatuses,
       fulfillmentTypes: args.fulfillmentTypes,
-      from: args.from,
-      size: args.size,
+      from: window.from,
+      size: window.size,
     });
   },
 });
@@ -145,11 +190,27 @@ export const getLatestPendingPaymentsSnapshot = internalQuery({
     ownerUserId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const normalizedSellerKey = args.sellerKey.toLowerCase();
+    if (args.ownerUserId) {
+      const ownedSnapshot = await ctx.db
+        .query("tcgplayerPendingPayments")
+        .withIndex("by_sellerKey_ownerUserId_syncedAt", (q) =>
+          q
+            .eq("sellerKey", normalizedSellerKey)
+            .eq("ownerUserId", args.ownerUserId),
+        )
+        .order("desc")
+        .first();
+      if (ownedSnapshot) return ownedSnapshot;
+    }
+
     const snapshots = await ctx.db
       .query("tcgplayerPendingPayments")
-      .withIndex("by_sellerKey", (q) => q.eq("sellerKey", args.sellerKey.toLowerCase()))
+      .withIndex("by_sellerKey_syncedAt", (q) =>
+        q.eq("sellerKey", normalizedSellerKey),
+      )
       .order("desc")
-      .collect();
+      .take(PENDING_PAYMENT_SCAN_LIMIT);
 
     return (
       snapshots.find((snapshot) =>
@@ -170,24 +231,34 @@ export const listOrders = query({
   handler: async (ctx, args) => {
     const ownerUserId = await requireAdminUserId(ctx);
     const normalizedSellerKey = args.sellerKey?.toLowerCase();
+    const window = getPageWindow(args);
+    const scanLimit = getOrderScanLimit(window);
 
     const orders = normalizedSellerKey
       ? await ctx.db
           .query("orders")
-          .withIndex("by_tcgplayerSellerKey_syncUpdatedAt", (q) =>
-            q.eq("tcgplayerSellerKey", normalizedSellerKey),
+          .withIndex("by_tcgplayerSellerKey_ownerUserId_syncUpdatedAt", (q) =>
+            q
+              .eq("tcgplayerSellerKey", normalizedSellerKey)
+              .eq("ownerUserId", ownerUserId),
           )
           .order("desc")
-          .collect()
-      : await ctx.db.query("orders").withIndex("by_syncUpdatedAt").order("desc").collect();
+          .take(scanLimit)
+      : await ctx.db
+          .query("orders")
+          .withIndex("by_ownerUserId_source_syncUpdatedAt", (q) =>
+            q.eq("ownerUserId", ownerUserId).eq("source", "tcgplayer"),
+          )
+          .order("desc")
+          .take(scanLimit);
 
     return applyOrderSnapshotFilters({
       orders,
       ownerUserId,
       orderStatuses: args.orderStatuses,
       fulfillmentTypes: args.fulfillmentTypes,
-      from: args.from,
-      size: args.size,
+      from: window.from,
+      size: window.size,
     });
   },
 });
@@ -221,12 +292,22 @@ export const getLatestPendingPayments = query({
   },
   handler: async (ctx, args) => {
     const ownerUserId = await requireAdminUserId(ctx);
+    const normalizedSellerKey = args.sellerKey.toLowerCase();
+
+    const ownedSnapshot = await ctx.db
+      .query("tcgplayerPendingPayments")
+      .withIndex("by_sellerKey_ownerUserId_syncedAt", (q) =>
+        q.eq("sellerKey", normalizedSellerKey).eq("ownerUserId", ownerUserId),
+      )
+      .order("desc")
+      .first();
+    if (ownedSnapshot) return ownedSnapshot;
 
     const snapshots = await ctx.db
       .query("tcgplayerPendingPayments")
-      .withIndex("by_sellerKey", (q) => q.eq("sellerKey", args.sellerKey.toLowerCase()))
+      .withIndex("by_sellerKey_syncedAt", (q) => q.eq("sellerKey", normalizedSellerKey))
       .order("desc")
-      .collect();
+      .take(PENDING_PAYMENT_SCAN_LIMIT);
 
     return (
       snapshots.find((snapshot) =>

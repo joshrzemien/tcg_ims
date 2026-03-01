@@ -183,6 +183,15 @@ function mapRates(data: { rates?: EasyPostRateRaw[] }): ShipmentRate[] {
   }));
 }
 
+function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 // ---------------------------------------------------------------------------
 // Public API functions
 // ---------------------------------------------------------------------------
@@ -380,6 +389,8 @@ export async function verifyWebhookSignature(
   const sig = signature.includes("=")
     ? signature.slice(signature.indexOf("=") + 1)
     : signature;
+  const normalizedSig = sig.trim().toLowerCase();
+  if (!/^[0-9a-f]+$/.test(normalizedSig)) return false;
 
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -395,5 +406,5 @@ export async function verifyWebhookSignature(
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  return expected === sig;
+  return timingSafeEqualHex(expected, normalizedSig);
 }

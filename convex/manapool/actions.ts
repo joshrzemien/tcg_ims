@@ -1192,113 +1192,118 @@ export const processOrderCreatedWebhook = internalAction({
   handler: async (ctx, args): Promise<WebhookProcessResult> => {
     if (args.event !== "order_created") {
       return {
-        processed: true,
-        deduped: false,
-        ignored: true,
+        processed: false,
         reason: "unsupported_event",
+        retryable: false,
       };
     }
 
-    const timestamp = Number.parseInt(args.timestamp, 10);
-    if (!Number.isFinite(timestamp)) {
-      return { processed: false, reason: "invalid_timestamp", retryable: true };
-    }
+    try {
+      const timestamp = Number.parseInt(args.timestamp, 10);
+      if (!Number.isFinite(timestamp)) {
+        return { processed: false, reason: "invalid_timestamp", retryable: false };
+      }
 
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (Math.abs(nowSeconds - timestamp) > WEBHOOK_REPLAY_WINDOW_SECONDS) {
-      return { processed: false, reason: "stale_timestamp", retryable: true };
-    }
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (Math.abs(nowSeconds - timestamp) > WEBHOOK_REPLAY_WINDOW_SECONDS) {
+        return { processed: false, reason: "stale_timestamp", retryable: false };
+      }
 
-    const webhooks = await ctx.runQuery(internal.manapool.queries.listWebhooksByTopic, {
-      topic: "order_created",
-    });
+      const webhooks = await ctx.runQuery(internal.manapool.queries.listWebhooksByTopic, {
+        topic: "order_created",
+      });
 
-    const secrets = webhooks
-      .map((webhook: { secret?: unknown; ownerUserId?: unknown }) => ({
-        secret: toOptionalString(webhook.secret),
-        ownerUserId: toOptionalString(webhook.ownerUserId),
-      }))
-      .filter(
-        (
-          value: {
-            secret: string | undefined;
-            ownerUserId: string | undefined;
-          },
-        ): value is { secret: string; ownerUserId: string | undefined } =>
-          !!value.secret,
+      const secrets = webhooks
+        .map((webhook: { secret?: unknown; ownerUserId?: unknown }) => ({
+          secret: toOptionalString(webhook.secret),
+          ownerUserId: toOptionalString(webhook.ownerUserId),
+        }))
+        .filter(
+          (
+            value: {
+              secret: string | undefined;
+              ownerUserId: string | undefined;
+            },
+          ): value is { secret: string; ownerUserId: string | undefined } =>
+            !!value.secret,
+        );
+
+      if (secrets.length === 0) {
+        console.error("ManaPool webhook secret missing for order_created topic");
+        return { processed: false, reason: "missing_secret", retryable: true };
+      }
+
+      let valid = false;
+      let matchedOwnerUserId: string | undefined;
+      for (const candidate of secrets) {
+        const secretValid = await verifyWebhookSignature({
+          secret: candidate.secret,
+          timestampHeader: args.timestamp,
+          signatureHeader: args.signature,
+          rawBody: args.rawBody,
+        });
+        if (secretValid) {
+          valid = true;
+          matchedOwnerUserId = candidate.ownerUserId;
+          break;
+        }
+      }
+
+      if (!valid) {
+        return { processed: false, reason: "invalid_signature", retryable: false };
+      }
+
+      const parsedSig = parseWebhookSignatureHeader(args.signature);
+      const signatureKey =
+        parsedSig.v1.length > 0
+          ? [...parsedSig.v1].sort().join(".")
+          : "missing";
+      const dedupeId = `${args.event}:${timestamp}:${signatureKey}`;
+
+      let parsed: unknown;
+      try {
+        parsed = camelizeKeysDeep(JSON.parse(args.rawBody));
+      } catch {
+        return { processed: false, reason: "invalid_json", retryable: false };
+      }
+
+      const payload = getOptionalRecord(parsed);
+      const order = findOrderInPayload(payload);
+      const orderId = toOptionalString(order?.id);
+
+      if (!payload || !order || !orderId) {
+        return { processed: false, reason: "missing_order", retryable: false };
+      }
+
+      // TODO(test): Verify webhook dedupe + retryability status mapping for all failure reasons.
+      const dedupe = await ctx.runMutation(
+        internal.manapool.mutations.insertWebhookDeliveryIfNew,
+        {
+          deliveryId: dedupeId,
+          event: args.event,
+          timestamp,
+          signature: args.signature,
+          manapoolOrderId: orderId,
+          payload,
+          processedAt: new Date().toISOString(),
+        },
       );
 
-    if (secrets.length === 0) {
-      console.error("ManaPool webhook secret missing for order_created topic");
-      return { processed: false, reason: "missing_secret", retryable: true };
-    }
-
-    let valid = false;
-    let matchedOwnerUserId: string | undefined;
-    for (const candidate of secrets) {
-      const secretValid = await verifyWebhookSignature({
-        secret: candidate.secret,
-        timestampHeader: args.timestamp,
-        signatureHeader: args.signature,
-        rawBody: args.rawBody,
-      });
-      if (secretValid) {
-        valid = true;
-        matchedOwnerUserId = candidate.ownerUserId;
-        break;
+      if (!dedupe.inserted) {
+        return { processed: true, deduped: true };
       }
+
+      await ctx.runMutation(internal.manapool.mutations.upsertOrderFromManaPool, {
+        ownerUserId: matchedOwnerUserId,
+        order,
+        syncedAt: new Date().toISOString(),
+      });
+
+      return { processed: true, deduped: false };
+    } catch (err) {
+      console.error("ManaPool order_created webhook processing failed", err);
+      return { processed: false, reason: "internal_error", retryable: true };
     }
-
-    if (!valid) {
-      return { processed: false, reason: "invalid_signature", retryable: true };
-    }
-
-    const parsedSig = parseWebhookSignatureHeader(args.signature);
-    const signatureKey =
-      parsedSig.v1.length > 0
-        ? [...parsedSig.v1].sort().join(".")
-        : "missing";
-    const dedupeId = `${args.event}:${timestamp}:${signatureKey}`;
-
-    let parsed: unknown;
-    try {
-      parsed = camelizeKeysDeep(JSON.parse(args.rawBody));
-    } catch {
-      return { processed: false, reason: "invalid_json", retryable: true };
-    }
-
-    const payload = getOptionalRecord(parsed);
-    const order = findOrderInPayload(payload);
-    const orderId = toOptionalString(order?.id);
-
-    if (!payload || !order || !orderId) {
-      return { processed: false, reason: "missing_order", retryable: true };
-    }
-
-    const dedupe = await ctx.runMutation(
-      internal.manapool.mutations.insertWebhookDeliveryIfNew,
-      {
-        deliveryId: dedupeId,
-        event: args.event,
-        timestamp,
-        signature: args.signature,
-        manapoolOrderId: orderId,
-        payload,
-        processedAt: new Date().toISOString(),
-      },
-    );
-
-    if (!dedupe.inserted) {
-      return { processed: true, deduped: true };
-    }
-
-    await ctx.runMutation(internal.manapool.mutations.upsertOrderFromManaPool, {
-      ownerUserId: matchedOwnerUserId,
-      order,
-      syncedAt: new Date().toISOString(),
-    });
-
-    return { processed: true, deduped: false };
   },
 });
 

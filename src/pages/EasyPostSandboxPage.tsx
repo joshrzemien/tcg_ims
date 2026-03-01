@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAction, useConvexAuth, useMutation, useQuery } from 'convex/react'
+import { useAction, useConvexAuth, useQuery } from 'convex/react'
 import {
   SignedIn,
   SignedOut,
@@ -282,7 +282,6 @@ function EasyPostSandboxPage() {
   )
   const purchaseLabel = useAction(api.shipping.actions.purchaseLabel)
   const voidLabel = useAction(api.shipping.actions.voidLabel)
-  const createTestOrder = useMutation(api.order.mutations.createTestOrder)
 
   const [fromAddressForm, setFromAddressForm] = useState(defaultFromAddress)
   const [toAddressForm, setToAddressForm] = useState(defaultToAddress)
@@ -446,13 +445,6 @@ function EasyPostSandboxPage() {
         serviceLevel,
       })
       setShipmentId(result.shipmentId)
-    })
-  }
-
-  const handleCreateTestOrder = async () => {
-    await runAction('create test order', async () => {
-      const id = await createTestOrder({})
-      setOrderId(id)
     })
   }
 
@@ -677,14 +669,6 @@ function EasyPostSandboxPage() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  className="rounded bg-indigo-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={isBusy || !canRunAuthedOperations}
-                  onClick={runClickHandler(handleCreateTestOrder)}
-                  type="button"
-                >
-                  Create Test Order
-                </button>
                 <button
                   className="rounded bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
                   disabled={isBusy || !canRunAuthedOperations}

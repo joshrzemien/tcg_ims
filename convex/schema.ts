@@ -44,12 +44,15 @@ export default defineSchema({
     service: v.optional(v.string()),
     easypostTrackerId: v.optional(v.string()),
     errorMessage: v.optional(v.string()),
+    // TODO(schema-hardening): Make required after legacy shipment rows are backfilled.
+    purchaseAttemptKey: v.optional(v.string()),
     parcelLength: v.number(),
     parcelWidth: v.number(),
     parcelHeight: v.number(),
     parcelWeight: v.number(),
   })
     .index("by_orderId", ["orderId"])
+    .index("by_purchaseAttemptKey", ["purchaseAttemptKey"])
     .index("by_easypostShipmentId", ["easypostShipmentId"])
     .index("by_trackingNumber", ["trackingNumber"]),
 
@@ -106,17 +109,33 @@ export default defineSchema({
     trackingNumbers: v.optional(v.array(v.string())),
     allowedActions: v.optional(v.array(v.string())),
     refundStatus: v.optional(v.string()),
+    // TODO(schema-hardening): Replace v.any fields with explicit canonical sub-shapes.
     shippingAddress: v.optional(v.any()),
+    // TODO(schema-hardening): Replace v.any fields with explicit canonical sub-shapes.
     payment: v.optional(v.any()),
+    // TODO(schema-hardening): Replace v.any fields with explicit canonical sub-shapes.
     fulfillments: v.optional(v.array(v.any())),
+    // TODO(schema-hardening): Replace v.any fields with explicit canonical sub-shapes.
     items: v.optional(v.array(v.any())),
+    // TODO(schema-hardening): Replace v.any fields with explicit canonical sub-shapes.
     reports: v.optional(v.array(v.any())),
     syncUpdatedAt: v.optional(v.string()),
   })
     .index("by_manapoolOrderId", ["manapoolOrderId"])
     .index("by_tcgplayerOrderNumber", ["tcgplayerOrderNumber"])
+    .index("by_source_syncUpdatedAt", ["source", "syncUpdatedAt"])
+    .index("by_ownerUserId_source_syncUpdatedAt", [
+      "ownerUserId",
+      "source",
+      "syncUpdatedAt",
+    ])
     .index("by_tcgplayerSellerKey_syncUpdatedAt", [
       "tcgplayerSellerKey",
+      "syncUpdatedAt",
+    ])
+    .index("by_tcgplayerSellerKey_ownerUserId_syncUpdatedAt", [
+      "tcgplayerSellerKey",
+      "ownerUserId",
       "syncUpdatedAt",
     ])
     .index("by_syncUpdatedAt", ["syncUpdatedAt"]),
@@ -135,6 +154,11 @@ export default defineSchema({
     syncedAt: v.string(),
   })
     .index("by_sellerKey", ["sellerKey"])
+    .index("by_sellerKey_ownerUserId_syncedAt", [
+      "sellerKey",
+      "ownerUserId",
+      "syncedAt",
+    ])
     .index("by_sellerKey_syncedAt", ["sellerKey", "syncedAt"]),
 
   manapoolInventoryItems: defineTable({
@@ -147,6 +171,7 @@ export default defineSchema({
     priceCents: v.optional(v.number()),
     effectiveAsOf: v.optional(v.string()),
     pricingAnomaly: v.optional(v.boolean()),
+    // TODO(schema-hardening): Replace payload with canonical item snapshot fields.
     payload: v.any(),
     syncedAt: v.string(),
   })
@@ -162,7 +187,9 @@ export default defineSchema({
     isPreview: v.optional(v.boolean()),
     downloadUrl: v.optional(v.string()),
     progressPercentage: v.optional(v.number()),
+    // TODO(schema-hardening): Replace payload/progress with explicit job schemas.
     payload: v.any(),
+    // TODO(schema-hardening): Replace payload/progress with explicit job schemas.
     progress: v.optional(v.array(v.any())),
     createdAt: v.optional(v.string()),
     updatedAt: v.optional(v.string()),
@@ -179,6 +206,7 @@ export default defineSchema({
     topic: v.string(),
     callbackUrl: v.string(),
     secret: v.optional(v.string()),
+    // TODO(schema-hardening): Replace payload with explicit webhook schema.
     payload: v.any(),
     syncedAt: v.string(),
   })
@@ -192,6 +220,7 @@ export default defineSchema({
     timestamp: v.number(),
     signature: v.string(),
     manapoolOrderId: v.optional(v.string()),
+    // TODO(schema-hardening): Replace payload with explicit webhook delivery schema.
     payload: v.any(),
     processedAt: v.string(),
   })
@@ -202,6 +231,7 @@ export default defineSchema({
   manapoolReadCache: defineTable({
     ownerUserId: v.optional(v.string()),
     cacheKey: v.string(),
+    // TODO(schema-hardening): Narrow cache payload shapes per endpoint key.
     payload: v.any(),
     fetchedAt: v.number(),
     expiresAt: v.number(),
