@@ -125,6 +125,18 @@ export const getShipmentByEasypostId = internalQuery({
   },
 });
 
+export const getRefundByShipmentInternal = internalQuery({
+  args: { shipmentId: v.id("shipments") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("refunds")
+      .withIndex("by_shipmentId", (q) =>
+        q.eq("shipmentId", args.shipmentId),
+      )
+      .first();
+  },
+});
+
 export const listShipmentsByOrderInternal = internalQuery({
   args: { orderId: v.id("orders") },
   handler: async (ctx, args) => {

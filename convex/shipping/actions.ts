@@ -48,9 +48,13 @@ function findUspsRate(
 
 /** Map EasyPost tracker status → our shipment status. Returns null if no change. */
 function mapTrackerStatus(
-  epStatus: string,
+  epStatus: unknown,
 ): "in_transit" | "delivered" | "returned" | "error" | null {
-  switch (epStatus) {
+  if (typeof epStatus !== "string") return null;
+  switch (epStatus.trim().toLowerCase()) {
+    case "unknown":
+    case "pre_transit":
+      return null;
     case "in_transit":
     case "out_for_delivery":
     case "available_for_pickup":
@@ -59,11 +63,41 @@ function mapTrackerStatus(
       return "delivered";
     case "return_to_sender":
       return "returned";
+    case "cancelled":
+    case "error":
     case "failure":
       return "error";
     default:
-      return null; // pre_transit, unknown — no status change
+      return null;
   }
+}
+
+function normalizeServiceLevel(serviceLevel: string): string {
+  return serviceLevel.trim().toLowerCase();
+}
+
+const REFUND_STATUSES = new Set([
+  "submitted",
+  "refunded",
+  "rejected",
+  "not_applicable",
+] as const);
+
+type RefundStatus = "submitted" | "refunded" | "rejected" | "not_applicable";
+
+function isRefundStatus(value: string): value is RefundStatus {
+  return REFUND_STATUSES.has(value as RefundStatus);
+}
+
+function formatAddressValidationError(
+  kind: "From" | "To",
+  verificationErrors?: string[],
+): string {
+  const errors = (verificationErrors ?? []).filter((e) => e.trim().length > 0);
+  if (errors.length === 0) {
+    return `${kind} address is not verified by EasyPost. Correct the address or use override to continue.`;
+  }
+  return `${kind} address failed verification: ${errors.join("; ")}. Correct the address or use override to continue.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +142,7 @@ export const verifyAndSaveAddress = action({
         phone: args.phone,
         email: args.email,
         isVerified: verified.isVerified,
+        isVerificationOverridden: false,
         easypostAddressId: verified.easypostAddressId,
         verificationErrors: verified.verificationErrors,
       },
@@ -117,6 +152,46 @@ export const verifyAndSaveAddress = action({
       addressId,
       isVerified: verified.isVerified,
       verificationErrors: verified.verificationErrors,
+    };
+  },
+});
+
+export const overrideAddressVerification = action({
+  args: {
+    addressId: v.id("addresses"),
+  },
+  handler: async (ctx, args): Promise<{
+    addressId: Id<"addresses">;
+    isVerified: boolean;
+    isVerificationOverridden: boolean;
+    verificationErrors: string[];
+  }> => {
+    const ownerUserId = await requireUserId(ctx);
+    const address = await ctx.runQuery(internal.shipping.queries.getAddressInternal, {
+      addressId: args.addressId,
+    });
+
+    if (!address) throw new Error("Address not found");
+    if (address.ownerUserId !== ownerUserId) {
+      throw new Error("Not authorized to override this address");
+    }
+
+    const isVerificationOverridden = address.isVerified ? false : true;
+    if (isVerificationOverridden) {
+      await ctx.runMutation(
+        internal.shipping.mutations.setAddressVerificationOverride,
+        {
+          addressId: args.addressId,
+          isVerificationOverridden,
+        },
+      );
+    }
+
+    return {
+      addressId: args.addressId,
+      isVerified: address.isVerified,
+      isVerificationOverridden,
+      verificationErrors: address.verificationErrors ?? [],
     };
   },
 });
@@ -151,64 +226,43 @@ export const purchaseLabel = action({
       }),
     ]);
 
-    if (fromAddress?.ownerUserId !== ownerUserId) {
+    if (!fromAddress) {
+      throw new Error("From address not found");
+    }
+    if (!toAddress) {
+      throw new Error("To address not found");
+    }
+    if (fromAddress.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized to use from address");
     }
-    if (toAddress?.ownerUserId !== ownerUserId) {
+    if (toAddress.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized to use to address");
     }
-    if (!fromAddress?.isVerified || !fromAddress.easypostAddressId) {
-      throw new Error("From address is not verified");
-    }
-    if (!toAddress?.isVerified || !toAddress.easypostAddressId) {
-      throw new Error("To address is not verified");
-    }
 
-    // 2. Reuse an existing purchased shipment for identical inputs (idempotency).
-    const existingByOrder = await ctx.runQuery(
-      internal.shipping.queries.listShipmentsByOrderInternal,
-      { orderId: args.orderId },
-    );
-    const matchingShipments = existingByOrder.filter(
-      (s) =>
-        s.ownerUserId === ownerUserId &&
-        s.fromAddressId === args.fromAddressId &&
-        s.toAddressId === args.toAddressId &&
-        s.parcelLength === args.parcelLength &&
-        s.parcelWidth === args.parcelWidth &&
-        s.parcelHeight === args.parcelHeight &&
-        s.parcelWeight === args.parcelWeight,
-    );
+    const fromAddressCanBeUsed =
+      !!fromAddress.easypostAddressId &&
+      (fromAddress.isVerified || fromAddress.isVerificationOverridden === true);
+    const toAddressCanBeUsed =
+      !!toAddress.easypostAddressId &&
+      (toAddress.isVerified || toAddress.isVerificationOverridden === true);
 
-    const existingPurchased = [...matchingShipments]
-      .reverse()
-      .find(
-        (s) =>
-          (s.status === "purchased" ||
-            s.status === "in_transit" ||
-            s.status === "delivered") &&
-          s.trackingNumber &&
-          s.labelUrl &&
-          typeof s.rateCents === "number" &&
-          s.service?.toLowerCase() === args.serviceLevel.toLowerCase(),
+    if (!fromAddressCanBeUsed) {
+      throw new Error(
+        formatAddressValidationError("From", fromAddress.verificationErrors),
       );
-    if (existingPurchased?.trackingNumber && existingPurchased.labelUrl) {
-      return {
-        shipmentId: existingPurchased._id,
-        trackingNumber: existingPurchased.trackingNumber,
-        labelUrl: existingPurchased.labelUrl,
-        rateCents: existingPurchased.rateCents!,
-      };
+    }
+    if (!toAddressCanBeUsed) {
+      throw new Error(
+        formatAddressValidationError("To", toAddress.verificationErrors),
+      );
     }
 
-    // 3. Reuse a matching in-progress shipment when possible.
-    const existingInProgress = [...matchingShipments]
-      .reverse()
-      .find((s) => s.status === "draft" || s.status === "error");
+    const serviceLevelNormalized = normalizeServiceLevel(args.serviceLevel);
 
-    const shipmentId =
-      existingInProgress?._id ??
-      (await ctx.runMutation(internal.shipping.mutations.createShipment, {
+    // 2. Atomically select or create the shipment attempt for these exact inputs.
+    const selected = await ctx.runMutation(
+      internal.shipping.mutations.getOrCreateShipmentForPurchase,
+      {
         ownerUserId,
         orderId: args.orderId,
         fromAddressId: args.fromAddressId,
@@ -217,17 +271,59 @@ export const purchaseLabel = action({
         parcelWidth: args.parcelWidth,
         parcelHeight: args.parcelHeight,
         parcelWeight: args.parcelWeight,
-      }));
+        serviceLevelNormalized,
+      },
+    );
 
-    let easypostShipmentId: string | null =
-      existingInProgress?.easypostShipmentId ?? null;
+    if (selected.kind === "already_purchased") {
+      return {
+        shipmentId: selected.shipmentId,
+        trackingNumber: selected.trackingNumber,
+        labelUrl: selected.labelUrl,
+        rateCents: selected.rateCents,
+      };
+    }
+
+    const shipmentId = selected.shipmentId;
+
+    // 3. Claim the shipment attempt before any external EasyPost writes.
+    const claim = await ctx.runMutation(
+      internal.shipping.mutations.claimShipmentPurchase,
+      {
+        shipmentId,
+        ownerUserId,
+      },
+    );
+    if (!claim.claimed) {
+      if (claim.reason === "already_purchased") {
+        return {
+          shipmentId: claim.shipmentId,
+          trackingNumber: claim.trackingNumber,
+          labelUrl: claim.labelUrl,
+          rateCents: claim.rateCents,
+        };
+      }
+      if (claim.reason === "in_progress") {
+        throw new Error(
+          "A label purchase for this shipment is already in progress. Retry shortly.",
+        );
+      }
+      if (claim.reason === "terminal_void") {
+        throw new Error(
+          "Cannot purchase on a voided shipment attempt. Create a new shipment attempt instead.",
+        );
+      }
+      throw new Error("Shipment is not in a purchaseable state.");
+    }
+
+    let easypostShipmentId: string | null = claim.easypostShipmentId ?? null;
     try {
       let rates: ShipmentRate[] = [];
       if (!easypostShipmentId) {
         // 4. Create shipment in EasyPost and persist linkage before buy.
         const created = await createShipment(apiKey, {
-          fromAddressId: fromAddress.easypostAddressId,
-          toAddressId: toAddress.easypostAddressId,
+          fromAddressId: fromAddress.easypostAddressId!,
+          toAddressId: toAddress.easypostAddressId!,
           parcel: {
             length: args.parcelLength,
             width: args.parcelWidth,
@@ -353,11 +449,11 @@ export const purchaseLabel = action({
 
 export const voidLabel = action({
   args: { shipmentId: v.id("shipments") },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ refundStatus: RefundStatus }> => {
     const apiKey = getApiKey();
     const ownerUserId = await requireUserId(ctx);
 
-    // 1. Validate shipment is purchased
+    // 1. Validate shipment ownership and fetch any existing refund record.
     const shipment = await ctx.runQuery(
       internal.shipping.queries.getShipmentInternal,
       { shipmentId: args.shipmentId },
@@ -366,6 +462,22 @@ export const voidLabel = action({
     if (!shipment.ownerUserId || shipment.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized");
     }
+
+    const existingRefund = await ctx.runQuery(
+      internal.shipping.queries.getRefundByShipmentInternal,
+      { shipmentId: args.shipmentId },
+    );
+
+    if (shipment.status === "voided") {
+      return { refundStatus: existingRefund?.status ?? "refunded" };
+    }
+    if (shipment.status === "void_pending") {
+      return { refundStatus: existingRefund?.status ?? "submitted" };
+    }
+    if (existingRefund) {
+      return { refundStatus: existingRefund.status };
+    }
+
     if (shipment.status !== "purchased") {
       throw new Error(
         `Cannot void shipment in "${shipment.status}" status — must be "purchased"`,
@@ -377,25 +489,32 @@ export const voidLabel = action({
 
     // 2. Refund via EasyPost
     const result = await refundShipment(apiKey, shipment.easypostShipmentId);
-    if (
-      result.easypostRefundStatus !== "submitted" &&
-      result.easypostRefundStatus !== "refunded" &&
-      result.easypostRefundStatus !== "rejected"
-    ) {
+    if (!isRefundStatus(result.easypostRefundStatus)) {
       throw new Error(
         `Unexpected EasyPost refund status: ${result.easypostRefundStatus}`,
       );
     }
 
-    // 3. Create refund record
-    await ctx.runMutation(internal.shipping.mutations.createRefund, {
+    // 3. Upsert refund record
+    await ctx.runMutation(internal.shipping.mutations.upsertRefundByShipment, {
       ownerUserId,
       shipmentId: args.shipmentId,
       status: result.easypostRefundStatus,
+      rejectionReason:
+        result.easypostRefundStatus === "rejected"
+          ? "Label refund rejected by EasyPost"
+          : result.easypostRefundStatus === "not_applicable"
+            ? "Label refund not applicable per EasyPost"
+            : undefined,
     });
 
     // 4. Update shipment status based on EasyPost result.
-    if (result.easypostRefundStatus === "refunded") {
+    if (result.easypostRefundStatus === "submitted") {
+      await ctx.runMutation(internal.shipping.mutations.updateShipmentStatus, {
+        shipmentId: args.shipmentId,
+        status: "void_pending",
+      });
+    } else if (result.easypostRefundStatus === "refunded") {
       await ctx.runMutation(internal.shipping.mutations.updateShipmentStatus, {
         shipmentId: args.shipmentId,
         status: "voided",
@@ -405,6 +524,12 @@ export const voidLabel = action({
         shipmentId: args.shipmentId,
         status: "error",
         errorMessage: "Label refund rejected by EasyPost",
+      });
+    } else if (result.easypostRefundStatus === "not_applicable") {
+      await ctx.runMutation(internal.shipping.mutations.updateShipmentStatus, {
+        shipmentId: args.shipmentId,
+        status: "error",
+        errorMessage: "Label refund not applicable per EasyPost",
       });
     }
 
@@ -446,8 +571,10 @@ export const processTrackingWebhook = internalAction({
     const tracker = payload.result;
     if (!tracker) return;
 
-    const eventId: string = payload.id;
-    const trackingNumber: string = tracker.tracking_code;
+    const eventId = typeof payload.id === "string" ? payload.id : null;
+    const trackingNumber =
+      typeof tracker.tracking_code === "string" ? tracker.tracking_code : null;
+    if (!eventId || !trackingNumber) return;
 
     // 3. Look up shipment
     const shipment = await ctx.runQuery(
@@ -458,9 +585,14 @@ export const processTrackingWebhook = internalAction({
       console.warn(`No shipment found for tracking number ${trackingNumber}`);
       return;
     }
+    if (shipment.status === "void_pending" || shipment.status === "voided") {
+      return;
+    }
 
     // 4. Extract latest tracking detail
-    const details = tracker.tracking_details ?? [];
+    const details = Array.isArray(tracker.tracking_details)
+      ? tracker.tracking_details
+      : [];
     const latest = details[details.length - 1];
     const location = latest?.tracking_location ?? {};
 
@@ -472,7 +604,7 @@ export const processTrackingWebhook = internalAction({
         shipmentId: shipment._id,
         trackingNumber,
         easypostEventId: eventId,
-        status: tracker.status ?? "unknown",
+        status: typeof tracker.status === "string" ? tracker.status : "unknown",
         message: latest?.message ?? "",
         datetime: latest?.datetime ?? new Date().toISOString(),
         city: location.city ?? undefined,

@@ -69,7 +69,12 @@ export interface PurchasedShipment {
 }
 
 export interface RefundResult {
-  easypostRefundStatus: string;
+  easypostRefundStatus:
+    | "submitted"
+    | "refunded"
+    | "rejected"
+    | "not_applicable"
+    | "unknown";
 }
 
 interface EasyPostRateRaw {
@@ -106,7 +111,7 @@ interface EasyPostShipmentResponse {
 }
 
 interface EasyPostRefundResponse {
-  refund_status: string;
+  refund_status?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +204,11 @@ export async function verifyAddress(
   const verificationErrors: string[] = (delivery?.errors ?? []).map((e) =>
     e.message ?? "Unknown verification error",
   );
+  if (!isVerified && verificationErrors.length === 0) {
+    verificationErrors.push(
+      "EasyPost could not verify this address. Use override only if you have manually confirmed it.",
+    );
+  }
 
   return {
     easypostAddressId: data.id,
@@ -339,7 +349,16 @@ export async function refundShipment(
     `/shipments/${shipmentId}/refund`,
   )) as EasyPostRefundResponse;
 
-  return { easypostRefundStatus: data.refund_status ?? "unknown" };
+  const rawStatus = typeof data.refund_status === "string" ? data.refund_status : "";
+  switch (rawStatus) {
+    case "submitted":
+    case "refunded":
+    case "rejected":
+    case "not_applicable":
+      return { easypostRefundStatus: rawStatus };
+    default:
+      return { easypostRefundStatus: "unknown" };
+  }
 }
 
 // ---------------------------------------------------------------------------
