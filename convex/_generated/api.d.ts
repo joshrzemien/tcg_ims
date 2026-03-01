@@ -8,9 +8,16 @@
  * @module
  */
 
+import type * as crons from "../crons.js";
 import type * as hello from "../hello.js";
 import type * as http from "../http.js";
 import type * as integrations_easypost from "../integrations/easypost.js";
+import type * as integrations_manapool from "../integrations/manapool.js";
+import type * as manapool_actions from "../manapool/actions.js";
+import type * as manapool_auth from "../manapool/auth.js";
+import type * as manapool_mutations from "../manapool/mutations.js";
+import type * as manapool_queries from "../manapool/queries.js";
+import type * as manapool_types from "../manapool/types.js";
 import type * as order_mutations from "../order/mutations.js";
 import type * as shipping_actions from "../shipping/actions.js";
 import type * as shipping_mutations from "../shipping/mutations.js";
@@ -23,9 +30,16 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  crons: typeof crons;
   hello: typeof hello;
   http: typeof http;
   "integrations/easypost": typeof integrations_easypost;
+  "integrations/manapool": typeof integrations_manapool;
+  "manapool/actions": typeof manapool_actions;
+  "manapool/auth": typeof manapool_auth;
+  "manapool/mutations": typeof manapool_mutations;
+  "manapool/queries": typeof manapool_queries;
+  "manapool/types": typeof manapool_types;
   "order/mutations": typeof order_mutations;
   "shipping/actions": typeof shipping_actions;
   "shipping/mutations": typeof shipping_mutations;
