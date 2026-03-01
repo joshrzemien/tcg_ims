@@ -1,6 +1,16 @@
 const ORDER_MANAGEMENT_BASE_URL = "https://order-management-api.tcgplayer.com";
 const STORE_ADMIN_BASE_URL = "https://store.tcgplayer.com";
 const ORDER_API_VERSION = "2.0";
+const SELLER_PORTAL_REFERER = "https://sellerportal.tcgplayer.com/";
+const STORE_PAYMENT_REFERER = "https://store.tcgplayer.com/admin/payment/sellerpayment";
+const BROWSER_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
+const BROWSER_SEC_CH_UA =
+  "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"";
+const BROWSER_SEC_CH_UA_PLATFORM = "\"macOS\"";
+const BROWSER_SEC_CH_UA_MOBILE = "?0";
+
+type RequestSurface = "orderManagement" | "storePayment";
 
 type QueryValue = string | number | boolean;
 type QueryInput =
@@ -154,11 +164,24 @@ function buildUrl(opts: {
 function buildHeaders(opts: {
   sessionCookie: string;
   accept: string;
+  surface: RequestSurface;
   contentTypeJson?: boolean;
 }): Headers {
   const headers = new Headers();
   headers.set("Accept", opts.accept);
   headers.set("Cookie", opts.sessionCookie);
+  headers.set("User-Agent", BROWSER_USER_AGENT);
+  headers.set("sec-ch-ua", BROWSER_SEC_CH_UA);
+  headers.set("sec-ch-ua-platform", BROWSER_SEC_CH_UA_PLATFORM);
+  headers.set("sec-ch-ua-mobile", BROWSER_SEC_CH_UA_MOBILE);
+
+  if (opts.surface === "orderManagement") {
+    headers.set("Referer", SELLER_PORTAL_REFERER);
+  } else {
+    headers.set("Referer", STORE_PAYMENT_REFERER);
+    headers.set("X-Requested-With", "XMLHttpRequest");
+  }
+
   if (opts.contentTypeJson) {
     headers.set("Content-Type", "application/json");
   }
@@ -218,6 +241,7 @@ async function requestJson<T>(opts: {
   method: "GET" | "POST";
   url: string;
   sessionCookie: string;
+  surface: RequestSurface;
   body?: unknown;
   accept?: string;
 }): Promise<T> {
@@ -226,6 +250,7 @@ async function requestJson<T>(opts: {
     headers: buildHeaders({
       sessionCookie: opts.sessionCookie,
       accept: opts.accept ?? "application/json, text/plain, */*",
+      surface: opts.surface,
       contentTypeJson: opts.body !== undefined,
     }),
     body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
@@ -254,6 +279,7 @@ async function requestExport(opts: {
     headers: buildHeaders({
       sessionCookie: opts.sessionCookie,
       accept: "application/json, text/plain, */*",
+      surface: "orderManagement",
       contentTypeJson: true,
     }),
     body: JSON.stringify(opts.body),
@@ -307,6 +333,7 @@ export async function searchOrders(opts: {
     method: "POST",
     url,
     sessionCookie: opts.sessionCookie,
+    surface: "orderManagement",
     body: opts.request,
   });
 }
@@ -325,6 +352,7 @@ export async function getOrderDetail(opts: {
     method: "GET",
     url,
     sessionCookie: opts.sessionCookie,
+    surface: "orderManagement",
   });
 }
 
@@ -395,6 +423,7 @@ export async function loadPendingPaymentsHtml(opts: {
     method: "GET",
     url,
     sessionCookie: opts.sessionCookie,
-    accept: "text/html, */*",
+    surface: "storePayment",
+    accept: "*/*",
   });
 }
