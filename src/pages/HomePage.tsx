@@ -34,7 +34,23 @@ function HomePage() {
           </div>
         </SignedOut>
         <SignedIn>
-          <h1 className="text-3xl font-semibold">{message ?? 'Loading...'}</h1>
+          <div className="space-y-4 text-center">
+            <h1 className="text-3xl font-semibold">{message ?? 'Loading...'}</h1>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <a
+                className="rounded bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+                href="/testing/manapool"
+              >
+                ManaPool Sandbox
+              </a>
+              <a
+                className="rounded border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+                href="/testing/easypost"
+              >
+                EasyPost Sandbox
+              </a>
+            </div>
+          </div>
         </SignedIn>
       </section>
     </main>

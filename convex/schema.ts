@@ -83,8 +83,96 @@ export default defineSchema({
     rejectionReason: v.optional(v.string()),
   }).index("by_shipmentId", ["shipmentId"]),
 
-  // Stub so v.id("orders") compiles. Replaced when orders domain is built.
   orders: defineTable({
+    ownerUserId: v.optional(v.string()),
+    source: v.optional(v.literal("manapool")),
+    manapoolOrderId: v.optional(v.string()),
     status: v.optional(v.string()),
-  }),
+    label: v.optional(v.string()),
+    createdAt: v.optional(v.string()),
+    buyerId: v.optional(v.string()),
+    totalCents: v.optional(v.number()),
+    shippingMethod: v.optional(v.string()),
+    latestFulfillmentStatus: v.optional(v.string()),
+    shippingAddress: v.optional(v.any()),
+    payment: v.optional(v.any()),
+    fulfillments: v.optional(v.array(v.any())),
+    items: v.optional(v.array(v.any())),
+    reports: v.optional(v.array(v.any())),
+    syncUpdatedAt: v.optional(v.string()),
+  })
+    .index("by_manapoolOrderId", ["manapoolOrderId"])
+    .index("by_syncUpdatedAt", ["syncUpdatedAt"]),
+
+  manapoolInventoryItems: defineTable({
+    ownerUserId: v.optional(v.string()),
+    manapoolInventoryId: v.string(),
+    productId: v.optional(v.string()),
+    productType: v.optional(v.string()),
+    tcgplayerSku: v.optional(v.number()),
+    quantity: v.optional(v.number()),
+    priceCents: v.optional(v.number()),
+    effectiveAsOf: v.optional(v.string()),
+    pricingAnomaly: v.optional(v.boolean()),
+    payload: v.any(),
+    syncedAt: v.string(),
+  })
+    .index("by_manapoolInventoryId", ["manapoolInventoryId"])
+    .index("by_productId", ["productId"])
+    .index("by_productType", ["productType"])
+    .index("by_syncedAt", ["syncedAt"]),
+
+  manapoolBulkPriceJobs: defineTable({
+    ownerUserId: v.optional(v.string()),
+    manapoolJobId: v.string(),
+    status: v.string(),
+    isPreview: v.optional(v.boolean()),
+    downloadUrl: v.optional(v.string()),
+    progressPercentage: v.optional(v.number()),
+    payload: v.any(),
+    progress: v.optional(v.array(v.any())),
+    createdAt: v.optional(v.string()),
+    updatedAt: v.optional(v.string()),
+    completedAt: v.optional(v.string()),
+    syncedAt: v.string(),
+  })
+    .index("by_manapoolJobId", ["manapoolJobId"])
+    .index("by_status", ["status"])
+    .index("by_syncedAt", ["syncedAt"]),
+
+  manapoolWebhooks: defineTable({
+    ownerUserId: v.optional(v.string()),
+    manapoolWebhookId: v.string(),
+    topic: v.string(),
+    callbackUrl: v.string(),
+    secret: v.optional(v.string()),
+    payload: v.any(),
+    syncedAt: v.string(),
+  })
+    .index("by_manapoolWebhookId", ["manapoolWebhookId"])
+    .index("by_topic", ["topic"])
+    .index("by_syncedAt", ["syncedAt"]),
+
+  manapoolWebhookDeliveries: defineTable({
+    deliveryId: v.string(),
+    event: v.string(),
+    timestamp: v.number(),
+    signature: v.string(),
+    manapoolOrderId: v.optional(v.string()),
+    payload: v.any(),
+    processedAt: v.string(),
+  })
+    .index("by_deliveryId", ["deliveryId"])
+    .index("by_orderId", ["manapoolOrderId"])
+    .index("by_processedAt", ["processedAt"]),
+
+  manapoolReadCache: defineTable({
+    ownerUserId: v.optional(v.string()),
+    cacheKey: v.string(),
+    payload: v.any(),
+    fetchedAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_cacheKey", ["cacheKey"])
+    .index("by_expiresAt", ["expiresAt"]),
 });
