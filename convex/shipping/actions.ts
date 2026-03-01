@@ -12,6 +12,7 @@ import {
   EasyPostError,
   type ShipmentRate,
 } from "../integrations/easypost";
+import { requireAdminUserId } from "../manapool/auth";
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -23,14 +24,6 @@ function getApiKey(): string {
   const key = process.env.EASYPOST_API_KEY;
   if (!key) throw new Error("EASYPOST_API_KEY not set");
   return key;
-}
-
-async function requireUserId(ctx: {
-  auth: { getUserIdentity: () => Promise<{ subject: string } | null> };
-}): Promise<string> {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) throw new Error("Not authenticated");
-  return identity.subject;
 }
 
 function findUspsRate(
@@ -123,7 +116,7 @@ export const verifyAndSaveAddress = action({
     verificationErrors: string[];
   }> => {
     const apiKey = getApiKey();
-    const ownerUserId = await requireUserId(ctx);
+    const ownerUserId = await requireAdminUserId(ctx);
 
     const verified = await verifyAddress(apiKey, args);
 
@@ -166,7 +159,7 @@ export const overrideAddressVerification = action({
     isVerificationOverridden: boolean;
     verificationErrors: string[];
   }> => {
-    const ownerUserId = await requireUserId(ctx);
+    const ownerUserId = await requireAdminUserId(ctx);
     const address = await ctx.runQuery(internal.shipping.queries.getAddressInternal, {
       addressId: args.addressId,
     });
@@ -214,7 +207,7 @@ export const purchaseLabel = action({
     rateCents: number;
   }> => {
     const apiKey = getApiKey();
-    const ownerUserId = await requireUserId(ctx);
+    const ownerUserId = await requireAdminUserId(ctx);
 
     // 1. Validate both addresses are verified
     const [fromAddress, toAddress] = await Promise.all([
@@ -451,7 +444,7 @@ export const voidLabel = action({
   args: { shipmentId: v.id("shipments") },
   handler: async (ctx, args): Promise<{ refundStatus: RefundStatus }> => {
     const apiKey = getApiKey();
-    const ownerUserId = await requireUserId(ctx);
+    const ownerUserId = await requireAdminUserId(ctx);
 
     // 1. Validate shipment ownership and fetch any existing refund record.
     const shipment = await ctx.runQuery(

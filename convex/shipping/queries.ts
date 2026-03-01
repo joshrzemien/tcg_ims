@@ -1,5 +1,6 @@
 import { query, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
+import { requireAdminUserId } from "../manapool/auth";
 
 // ---------------------------------------------------------------------------
 // Public queries (auth-gated, for frontend)
@@ -8,11 +9,10 @@ import { v } from "convex/values";
 export const getShipment = query({
   args: { shipmentId: v.id("shipments") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const ownerUserId = await requireAdminUserId(ctx);
     const shipment = await ctx.db.get(args.shipmentId);
     if (!shipment) return null;
-    if (!shipment.ownerUserId || shipment.ownerUserId !== identity.subject) {
+    if (!shipment.ownerUserId || shipment.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized");
     }
     return shipment;
@@ -22,11 +22,10 @@ export const getShipment = query({
 export const getAddress = query({
   args: { addressId: v.id("addresses") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const ownerUserId = await requireAdminUserId(ctx);
     const address = await ctx.db.get(args.addressId);
     if (!address) return null;
-    if (!address.ownerUserId || address.ownerUserId !== identity.subject) {
+    if (!address.ownerUserId || address.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized");
     }
     return address;
@@ -36,23 +35,21 @@ export const getAddress = query({
 export const listShipmentsByOrder = query({
   args: { orderId: v.id("orders") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const ownerUserId = await requireAdminUserId(ctx);
     const shipments = await ctx.db
       .query("shipments")
       .withIndex("by_orderId", (q) => q.eq("orderId", args.orderId))
       .collect();
-    return shipments.filter((s) => s.ownerUserId === identity.subject);
+    return shipments.filter((s) => s.ownerUserId === ownerUserId);
   },
 });
 
 export const listTrackingEvents = query({
   args: { shipmentId: v.id("shipments") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const ownerUserId = await requireAdminUserId(ctx);
     const shipment = await ctx.db.get(args.shipmentId);
-    if (!shipment || !shipment.ownerUserId || shipment.ownerUserId !== identity.subject) {
+    if (!shipment || !shipment.ownerUserId || shipment.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized");
     }
     return await ctx.db
@@ -68,10 +65,9 @@ export const listTrackingEvents = query({
 export const getRefundByShipment = query({
   args: { shipmentId: v.id("shipments") },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error("Not authenticated");
+    const ownerUserId = await requireAdminUserId(ctx);
     const shipment = await ctx.db.get(args.shipmentId);
-    if (!shipment || !shipment.ownerUserId || shipment.ownerUserId !== identity.subject) {
+    if (!shipment || !shipment.ownerUserId || shipment.ownerUserId !== ownerUserId) {
       throw new Error("Not authorized");
     }
     return await ctx.db

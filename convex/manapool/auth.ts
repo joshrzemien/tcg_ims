@@ -30,7 +30,7 @@ export function getUserRole(identity: unknown): string | undefined {
 
 export async function requireAdminUserId(ctx: {
   auth: {
-    getUserIdentity: () => Promise<Record<string, unknown> | null>;
+    getUserIdentity: () => Promise<{ subject?: unknown } | null>;
   };
 }): Promise<string> {
   const identity = await ctx.auth.getUserIdentity();
