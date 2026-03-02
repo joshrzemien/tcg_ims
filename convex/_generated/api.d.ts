@@ -23,6 +23,7 @@ import type * as manapool_types from "../manapool/types.js";
 import type * as shipping_actions from "../shipping/actions.js";
 import type * as shipping_mutations from "../shipping/mutations.js";
 import type * as shipping_queries from "../shipping/queries.js";
+import type * as shipping_types from "../shipping/types.js";
 import type * as tcgplayer_actions from "../tcgplayer/actions.js";
 import type * as tcgplayer_mutations from "../tcgplayer/mutations.js";
 import type * as tcgplayer_queries from "../tcgplayer/queries.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   "shipping/actions": typeof shipping_actions;
   "shipping/mutations": typeof shipping_mutations;
   "shipping/queries": typeof shipping_queries;
+  "shipping/types": typeof shipping_types;
   "tcgplayer/actions": typeof tcgplayer_actions;
   "tcgplayer/mutations": typeof tcgplayer_mutations;
   "tcgplayer/queries": typeof tcgplayer_queries;

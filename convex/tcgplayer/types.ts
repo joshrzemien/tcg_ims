@@ -2,6 +2,11 @@ import type {
   OrderDetailResponse,
   SearchOrderSummary,
 } from "../integrations/tcgplayer";
+import {
+  isRecord,
+  toOptionalBoolean,
+  toOptionalString,
+} from "../lib/normalize";
 
 export interface CanonicalOrderSummary {
   orderNumber: string;
@@ -72,18 +77,6 @@ const FILTER_STATUS_BY_TOKEN: Record<string, string> = {
   readyforpickup: "ReadyForPickup",
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function toOptionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function toOptionalBoolean(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
 function normalizeToken(value: string): string {
   return value.replace(/[^a-zA-Z0-9]+/g, "").toLowerCase();
 }
@@ -150,7 +143,9 @@ function extractLastCurrencyCents(value: string): number | undefined {
   return undefined;
 }
 
-function summaryHashPayload(summary: Omit<CanonicalOrderSummary, "summaryHash">): string {
+export function summaryHashPayload(
+  summary: Omit<CanonicalOrderSummary, "summaryHash">,
+): string {
   return JSON.stringify({
     orderNumber: summary.orderNumber,
     sellerKey: summary.sellerKey,

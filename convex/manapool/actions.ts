@@ -51,11 +51,8 @@ import {
   type SellerInventoryScryfallLookup,
   type SellerInventoryTcgplayerLookup,
 } from "../integrations/manapool";
-import {
-  camelizeKeysDeep,
-  getOptionalRecord,
-  toOptionalString,
-} from "./types";
+import { getOptionalRecord, toOptionalString } from "../lib/normalize";
+import { camelizeKeysDeep } from "./types";
 import {
   getManaPoolCredentialsOrNull,
   getManaPoolCredentialsOrThrow,

@@ -10,9 +10,9 @@ import {
   refundShipment,
   verifyWebhookSignature,
   EasyPostError,
-  type ShipmentRate,
 } from "../integrations/easypost";
 import { requireAdminUserId } from "../manapool/auth";
+import type { ShipmentRate } from "./types";
 
 declare const process: { env: Record<string, string | undefined> };
 

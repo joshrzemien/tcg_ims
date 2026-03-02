@@ -23,6 +23,7 @@ import {
   normalizeFulfillmentFilter,
   normalizeOrderStatusFilter,
   parsePendingPaymentsHtml,
+  summaryHashPayload,
 } from "./types";
 
 declare const process: { env: Record<string, string | undefined> };
@@ -200,24 +201,6 @@ function toExportResponse(args: {
     mimeType,
     fileName: parseFileName(args.document.contentDisposition, args.fallbackFileName),
   };
-}
-
-function summaryHashPayload(summary: Omit<CanonicalOrderSummary, "summaryHash">): string {
-  return JSON.stringify({
-    orderNumber: summary.orderNumber,
-    sellerKey: summary.sellerKey,
-    createdAt: summary.createdAt,
-    statusDisplay: summary.statusDisplay,
-    statusCode: summary.statusCode,
-    orderChannel: summary.orderChannel,
-    buyerName: summary.buyerName,
-    shippingType: summary.shippingType,
-    orderFulfillment: summary.orderFulfillment,
-    buyerPaid: summary.buyerPaid,
-    productAmountCents: summary.productAmountCents,
-    shippingAmountCents: summary.shippingAmountCents,
-    totalAmountCents: summary.totalAmountCents,
-  });
 }
 
 function mapSnapshotToCanonicalSummary(

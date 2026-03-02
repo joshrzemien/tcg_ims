@@ -1,81 +1,22 @@
 // Pure TypeScript — zero Convex imports.
 // API key is always passed as a parameter; this module never reads process.env.
 
+import type {
+  AddressInput,
+  CreatedShipment,
+  ParcelInput,
+  PurchasedShipment,
+  RefundResult,
+  RetrievedShipment,
+  ShipmentRate,
+  VerifiedAddress,
+} from "../shipping/types";
+
 const BASE_URL = "https://api.easypost.com/v2";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export interface AddressInput {
-  street1: string;
-  street2?: string;
-  city: string;
-  state: string;
-  zip: string;
-  country: string;
-  name?: string;
-  company?: string;
-  phone?: string;
-  email?: string;
-}
-
-export interface VerifiedAddress {
-  easypostAddressId: string;
-  isVerified: boolean;
-  street1: string;
-  street2?: string;
-  city: string;
-  state: string;
-  zip: string;
-  country: string;
-  verificationErrors: string[];
-}
-
-export interface ParcelInput {
-  length: number;
-  width: number;
-  height: number;
-  weight: number; // ounces
-}
-
-export interface ShipmentRate {
-  rateId: string;
-  carrier: string;
-  service: string;
-  rateCents: number;
-  deliveryDays: number | null;
-}
-
-export interface CreatedShipment {
-  easypostShipmentId: string;
-  rates: ShipmentRate[];
-}
-
-export interface RetrievedShipment {
-  easypostShipmentId: string;
-  rates: ShipmentRate[];
-  purchased: boolean;
-  purchasedData: PurchasedShipment | null;
-}
-
-export interface PurchasedShipment {
-  trackingNumber: string;
-  labelUrl: string;
-  rateCents: number;
-  carrier: string;
-  service: string;
-  easypostTrackerId: string;
-}
-
-export interface RefundResult {
-  easypostRefundStatus:
-    | "submitted"
-    | "refunded"
-    | "rejected"
-    | "not_applicable"
-    | "unknown";
-}
 
 interface EasyPostRateRaw {
   id: string;

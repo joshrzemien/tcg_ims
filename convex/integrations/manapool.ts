@@ -1,6 +1,11 @@
-import { camelizeKeysDeep, type ManaPoolCredentials } from "../manapool/types";
+import { camelizeKeysDeep } from "../manapool/types";
 
 const BASE_URL = "https://manapool.com/api/v1";
+
+export type ManaPoolCredentials = {
+  email: string;
+  accessToken: string;
+};
 
 type QueryValue = string | number | boolean;
 type QueryInput =

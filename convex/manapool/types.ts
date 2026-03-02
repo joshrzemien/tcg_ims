@@ -1,20 +1,6 @@
-import {
-  getOptionalArray,
-  getOptionalRecord,
-  isRecord,
-  toOptionalBoolean,
-  toOptionalNumber,
-  toOptionalString,
-} from "../lib/normalize";
-
-export const MANAPOOL_ROLE = "admin" as const;
+import { isRecord } from "../lib/normalize";
 
 export type ManaPoolFormat = "json" | "csv";
-
-export type ManaPoolCredentials = {
-  email: string;
-  accessToken: string;
-};
 
 export type SellerReadCacheEnvelope<T> = {
   data: T;
@@ -40,12 +26,3 @@ export function camelizeKeysDeep<T>(value: T): T {
 
   return value;
 }
-
-export {
-  getOptionalArray,
-  getOptionalRecord,
-  isRecord,
-  toOptionalBoolean,
-  toOptionalNumber,
-  toOptionalString,
-};

@@ -1,6 +1,8 @@
-import { MANAPOOL_ROLE, type ManaPoolCredentials, isRecord } from "./types";
+import type { ManaPoolCredentials } from "../integrations/manapool";
+import { isRecord } from "../lib/normalize";
 
 declare const process: { env: Record<string, string | undefined> };
+const MANAPOOL_ROLE = "admin";
 
 function getNestedClaim(
   source: unknown,
