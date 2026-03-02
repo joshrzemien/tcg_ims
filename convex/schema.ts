@@ -227,15 +227,4 @@ export default defineSchema({
     .index("by_deliveryId", ["deliveryId"])
     .index("by_orderId", ["manapoolOrderId"])
     .index("by_processedAt", ["processedAt"]),
-
-  manapoolReadCache: defineTable({
-    ownerUserId: v.optional(v.string()),
-    cacheKey: v.string(),
-    // TODO(schema-hardening): Narrow cache payload shapes per endpoint key.
-    payload: v.any(),
-    fetchedAt: v.number(),
-    expiresAt: v.number(),
-  })
-    .index("by_cacheKey", ["cacheKey"])
-    .index("by_expiresAt", ["expiresAt"]),
 });

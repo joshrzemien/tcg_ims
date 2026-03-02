@@ -1,18 +1,6 @@
 import { internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 
-export const getReadCacheByKey = internalQuery({
-  args: {
-    cacheKey: v.string(),
-  },
-  handler: async (ctx, args) => {
-    return await ctx.db
-      .query("manapoolReadCache")
-      .withIndex("by_cacheKey", (q) => q.eq("cacheKey", args.cacheKey))
-      .first();
-  },
-});
-
 export const getWebhookByTopic = internalQuery({
   args: {
     topic: v.string(),

@@ -116,62 +116,6 @@ function extractOrderFields(
   };
 }
 
-export const upsertReadCache = internalMutation({
-  args: {
-    ownerUserId: v.optional(v.string()),
-    cacheKey: v.string(),
-    payload: v.any(),
-    fetchedAt: v.number(),
-    ttlSeconds: v.number(),
-  },
-  handler: async (ctx, args) => {
-    const expiresAt = args.fetchedAt + args.ttlSeconds * 1000;
-
-    const existing = await ctx.db
-      .query("manapoolReadCache")
-      .withIndex("by_cacheKey", (q) => q.eq("cacheKey", args.cacheKey))
-      .first();
-
-    const patch = {
-      ownerUserId: args.ownerUserId,
-      cacheKey: args.cacheKey,
-      payload: args.payload,
-      fetchedAt: args.fetchedAt,
-      expiresAt,
-    };
-
-    if (existing) {
-      await ctx.db.patch(existing._id, patch);
-      return existing._id;
-    }
-
-    return await ctx.db.insert("manapoolReadCache", patch);
-  },
-});
-
-export const deleteReadCacheEntries = internalMutation({
-  args: {
-    keys: v.array(v.string()),
-  },
-  handler: async (ctx, args) => {
-    let deleted = 0;
-
-    for (const key of args.keys) {
-      const existing = await ctx.db
-        .query("manapoolReadCache")
-        .withIndex("by_cacheKey", (q) => q.eq("cacheKey", key))
-        .collect();
-
-      for (const item of existing) {
-        await ctx.db.delete(item._id);
-        deleted += 1;
-      }
-    }
-
-    return { deleted };
-  },
-});
-
 export const upsertInventorySnapshots = internalMutation({
   args: {
     ownerUserId: v.optional(v.string()),

@@ -31,7 +31,6 @@ import {
   getSinglesPrices,
   getVariantPrices,
   getWebhook,
-  isOutageError,
   listBulkPriceJobs,
   listSellerInventory,
   listSellerInventoryAnomalies,
@@ -59,7 +58,6 @@ import {
   requireAdminUserId,
 } from "./auth";
 
-const SELLER_CACHE_TTL_SECONDS = 5 * 60;
 const WEBHOOK_REPLAY_WINDOW_SECONDS = 5 * 60;
 const RECONCILE_PAGE_SIZE = 100;
 const RECONCILE_MAX_PAGES = 100;
@@ -79,28 +77,6 @@ type WebhookProcessResult =
       reason: string;
       retryable: boolean;
     };
-
-function stringifyKeyPart(value: unknown): string {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value)
-  ) {
-    return JSON.stringify(value);
-  }
-  return JSON.stringify(value, Object.keys(value).sort());
-}
-
-function buildSellerCacheKey(
-  ownerUserId: string,
-  endpoint: string,
-  args?: unknown,
-): string {
-  if (args === undefined) {
-    return `${ownerUserId}:${endpoint}`;
-  }
-  return `${ownerUserId}:${endpoint}:${stringifyKeyPart(args)}`;
-}
 
 function ensureOneLookupKey(args: {
   scryfallIds?: string[];
@@ -124,39 +100,6 @@ function ensureOneLookupKey(args: {
   const count = (keys[0]?.[1] as unknown[] | undefined)?.length ?? 0;
   if (count > 100) {
     throw new Error("Lookup request max is 100 IDs");
-  }
-}
-
-async function readWithSellerCache<T>(opts: {
-  ctx: CacheCtx;
-  ownerUserId: string;
-  cacheKey: string;
-  liveFetch: () => Promise<T>;
-}): Promise<T> {
-  const now = Date.now();
-
-  try {
-    const live = await opts.liveFetch();
-    await opts.ctx.runMutation(internal.manapool.mutations.upsertReadCache, {
-      ownerUserId: opts.ownerUserId,
-      cacheKey: opts.cacheKey,
-      payload: live,
-      fetchedAt: now,
-      ttlSeconds: SELLER_CACHE_TTL_SECONDS,
-    });
-    return live;
-  } catch (err) {
-    if (!isOutageError(err)) throw err;
-
-    const cached = await opts.ctx.runQuery(internal.manapool.queries.getReadCacheByKey, {
-      cacheKey: opts.cacheKey,
-    });
-
-    if (cached && typeof cached.expiresAt === "number" && cached.expiresAt >= now) {
-      return cached.payload as T;
-    }
-
-    throw err;
   }
 }
 
@@ -424,14 +367,7 @@ export const listSellerInventoryAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerInventory.list", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => listSellerInventory(credentials, args),
-    });
+    const response = await listSellerInventory(credentials, args);
 
     await upsertInventoryFromResponse(ctx, ownerUserId, response);
     return response;
@@ -582,43 +518,39 @@ export const getSellerInventoryItemAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerInventory.getItem", args.lookup);
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: async () => {
-        switch (args.lookup.type) {
-          case "tcgsku":
-            return await getSellerInventoryByTcgsku(credentials, args.lookup.sku);
-          case "product":
-            return await getSellerInventoryByProduct(
-              credentials,
-              args.lookup.productType,
-              args.lookup.productId,
-            );
-          case "scryfall": {
-            const lookup: SellerInventoryScryfallLookup = {
-              scryfallId: args.lookup.scryfallId,
-              languageId: args.lookup.languageId,
-              finishId: args.lookup.finishId,
-              conditionId: args.lookup.conditionId,
-            };
-            return await getSellerInventoryByScryfallId(credentials, lookup);
-          }
-          case "tcgplayer": {
-            const lookup: SellerInventoryTcgplayerLookup = {
-              tcgplayerId: args.lookup.tcgplayerId,
-              languageId: args.lookup.languageId,
-              finishId: args.lookup.finishId,
-              conditionId: args.lookup.conditionId,
-            };
-            return await getSellerInventoryByTcgplayerId(credentials, lookup);
-          }
-        }
-      },
-    });
+    let response: unknown;
+    switch (args.lookup.type) {
+      case "tcgsku":
+        response = await getSellerInventoryByTcgsku(credentials, args.lookup.sku);
+        break;
+      case "product":
+        response = await getSellerInventoryByProduct(
+          credentials,
+          args.lookup.productType,
+          args.lookup.productId,
+        );
+        break;
+      case "scryfall": {
+        const lookup: SellerInventoryScryfallLookup = {
+          scryfallId: args.lookup.scryfallId,
+          languageId: args.lookup.languageId,
+          finishId: args.lookup.finishId,
+          conditionId: args.lookup.conditionId,
+        };
+        response = await getSellerInventoryByScryfallId(credentials, lookup);
+        break;
+      }
+      case "tcgplayer": {
+        const lookup: SellerInventoryTcgplayerLookup = {
+          tcgplayerId: args.lookup.tcgplayerId,
+          languageId: args.lookup.languageId,
+          finishId: args.lookup.finishId,
+          conditionId: args.lookup.conditionId,
+        };
+        response = await getSellerInventoryByTcgplayerId(credentials, lookup);
+        break;
+      }
+    }
 
     await upsertInventoryFromResponse(ctx, ownerUserId, response);
     return response;
@@ -750,13 +682,7 @@ export const batchGetTcgskuInventoryAction = action({
       throw new Error("skus must be between 1 and 500");
     }
 
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerInventory.batchGetTcgsku", args);
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => batchGetSellerInventoryByTcgsku(credentials, args.skus),
-    });
+    const response = await batchGetSellerInventoryByTcgsku(credentials, args.skus);
 
     await upsertInventoryFromResponse(ctx, ownerUserId, response);
     return response;
@@ -769,30 +695,16 @@ export const listInventoryAnomaliesAction = action({
     offset: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerInventory.listAnomalies", args);
-    return await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => listSellerInventoryAnomalies(credentials, args),
-    });
+    const { credentials } = await requireAdminAndCredentials(ctx);
+    return await listSellerInventoryAnomalies(credentials, args);
   },
 });
 
 export const countInventoryAnomaliesAction = action({
   args: {},
   handler: async (ctx) => {
-    const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerInventory.countAnomalies");
-    return await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => countSellerInventoryAnomalies(credentials),
-    });
+    const { credentials } = await requireAdminAndCredentials(ctx);
+    return await countSellerInventoryAnomalies(credentials);
   },
 });
 
@@ -835,18 +747,10 @@ export const countBulkPricingAction = action({
     pricing: v.any(),
   },
   handler: async (ctx, args) => {
-    const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "bulkPricing.count", args);
-
-    return await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () =>
-        countBulkPriceMatches(credentials, {
-          filters: args.filters,
-          pricing: args.pricing,
-        }),
+    const { credentials } = await requireAdminAndCredentials(ctx);
+    return await countBulkPriceMatches(credentials, {
+      filters: args.filters,
+      pricing: args.pricing,
     });
   },
 });
@@ -857,18 +761,10 @@ export const previewBulkPricingAction = action({
     pricing: v.any(),
   },
   handler: async (ctx, args) => {
-    const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "bulkPricing.preview", args);
-
-    return await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () =>
-        previewBulkPrice(credentials, {
-          filters: args.filters,
-          pricing: args.pricing,
-        }),
+    const { credentials } = await requireAdminAndCredentials(ctx);
+    return await previewBulkPrice(credentials, {
+      filters: args.filters,
+      pricing: args.pricing,
     });
   },
 });
@@ -880,14 +776,7 @@ export const listBulkPricingJobsAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "bulkPricing.listJobs", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => listBulkPriceJobs(credentials, args),
-    });
+    const response = await listBulkPriceJobs(credentials, args);
 
     await ctx.runMutation(internal.manapool.mutations.upsertBulkPriceJobs, {
       ownerUserId,
@@ -905,14 +794,7 @@ export const getBulkPricingJobAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "bulkPricing.getJob", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => getBulkPriceJob(credentials, args.jobId),
-    });
+    const response = await getBulkPriceJob(credentials, args.jobId);
 
     await upsertJobFromPayload(ctx, ownerUserId, response);
     return response;
@@ -923,14 +805,7 @@ export const getRecentBulkPricingJobAction = action({
   args: {},
   handler: async (ctx) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "bulkPricing.getRecentJob");
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => getRecentBulkPriceJob(credentials),
-    });
+    const response = await getRecentBulkPriceJob(credentials);
 
     const recent = getOptionalRecord(response);
     const jobId = toOptionalString(recent?.jobId);
@@ -971,14 +846,7 @@ export const listSellerOrdersAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerOrders.list", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => listSellerOrders(credentials, args),
-    });
+    const response = await listSellerOrders(credentials, args);
 
     const orders = extractOrders(response);
     if (orders.length > 0) {
@@ -999,14 +867,7 @@ export const getSellerOrderAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerOrders.get", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => getSellerOrder(credentials, args.orderId),
-    });
+    const response = await getSellerOrder(credentials, args.orderId);
 
     await upsertOrderPayload(ctx, ownerUserId, response);
     return response;
@@ -1061,14 +922,7 @@ export const getSellerOrderReportsAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "sellerOrders.getReports", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => getSellerOrderReports(credentials, args.orderId),
-    });
+    const response = await getSellerOrderReports(credentials, args.orderId);
 
     const reports = extractReports(response);
     if (reports.length > 0) {
@@ -1090,14 +944,7 @@ export const listWebhooksAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "webhooks.list", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => listWebhooks(credentials, args.topic),
-    });
+    const response = await listWebhooks(credentials, args.topic);
 
     const record = getOptionalRecord(response);
     const webhooks = Array.isArray(record?.webhooks) ? record.webhooks : [];
@@ -1119,14 +966,7 @@ export const getWebhookAction = action({
   },
   handler: async (ctx, args) => {
     const { ownerUserId, credentials } = await requireAdminAndCredentials(ctx);
-    const cacheKey = buildSellerCacheKey(ownerUserId, "webhooks.get", args);
-
-    const response = await readWithSellerCache({
-      ctx,
-      ownerUserId,
-      cacheKey,
-      liveFetch: () => getWebhook(credentials, args.webhookId),
-    });
+    const response = await getWebhook(credentials, args.webhookId);
 
     await ctx.runMutation(internal.manapool.mutations.upsertWebhook, {
       ownerUserId,
