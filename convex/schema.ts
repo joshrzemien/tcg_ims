@@ -140,6 +140,14 @@ export default defineSchema({
     ])
     .index("by_syncUpdatedAt", ["syncUpdatedAt"]),
 
+  orderSyncStatus: defineTable({
+    source: v.union(v.literal("manapool"), v.literal("tcgplayer")),
+    status: v.union(v.literal("ok"), v.literal("error")),
+    lastAttemptAt: v.string(),
+    lastSuccessAt: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+  }).index("by_source", ["source"]),
+
   tcgplayerPendingPayments: defineTable({
     ownerUserId: v.optional(v.string()),
     sellerKey: v.string(),
